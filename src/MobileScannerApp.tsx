@@ -13,7 +13,9 @@ import {
     History,
     Link,
     LogOut,
-    Sparkles
+    Sparkles,
+    QrCode,
+    X
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -31,6 +33,8 @@ export default function MobileScannerApp() {
     const [isSessionSet, setIsSessionSet] = useState<boolean>(false);
     const [connectionStatus, setConnectionStatus] = useState<'offline' | 'connecting' | 'live'>('offline');
     const [errorMessage, setErrorMessage] = useState<string>('');
+    const [isQrScannerActive, setIsQrScannerActive] = useState<boolean>(false);
+    const [qrError, setQrError] = useState<string>('');
 
     // Scans History
     const [scanHistory, setScanHistory] = useState<ScanItem[]>([]);
@@ -49,6 +53,8 @@ export default function MobileScannerApp() {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
     const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const qrVideoRef = useRef<HTMLVideoElement | null>(null);
+    const qrCodeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
 
     // Request permission & list devices
     const initCamera = async () => {
@@ -188,6 +194,88 @@ export default function MobileScannerApp() {
     const handleDisconnect = () => {
         cleanupConnection();
         setIsSessionSet(false);
+    };
+
+    // 2b. Initialize QR Scanner on Connection Screen
+    useEffect(() => {
+        if (!isQrScannerActive || isSessionSet) {
+            if (qrCodeReaderRef.current) {
+                qrCodeReaderRef.current.reset();
+            }
+            return;
+        }
+
+        const qrCodeReader = new BrowserMultiFormatReader();
+        qrCodeReaderRef.current = qrCodeReader;
+        setQrError('');
+
+        // Request media access to trigger permission dialog
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+            .then((stream) => {
+                stream.getTracks().forEach(track => track.stop());
+                return qrCodeReader.listVideoInputDevices();
+            })
+            .then((devices) => {
+                if (devices.length === 0) {
+                    setQrError('No camera devices found.');
+                    return;
+                }
+
+                // Prefer back camera
+                const rearDevice = devices.find(d =>
+                    d.label.toLowerCase().includes('back') ||
+                    d.label.toLowerCase().includes('rear') ||
+                    d.label.toLowerCase().includes('environment')
+                );
+                const devId = rearDevice ? rearDevice.deviceId : devices[0].deviceId;
+
+                if (!qrVideoRef.current) return;
+
+                return qrCodeReader.decodeFromVideoDevice(
+                    devId,
+                    qrVideoRef.current,
+                    (result) => {
+                        if (result) {
+                            const text = result.getText();
+                            handleQrDecoded(text);
+                        }
+                    }
+                );
+            })
+            .catch((err) => {
+                console.error('QR scanner init error:', err);
+                setQrError('Camera access denied or failed.');
+            });
+
+        return () => {
+            if (qrCodeReaderRef.current) {
+                qrCodeReaderRef.current.reset();
+            }
+        };
+    }, [isQrScannerActive, isSessionSet]);
+
+    const handleQrDecoded = (decodedText: string) => {
+        console.log('QR Code decoded:', decodedText);
+        let parsedSession = '';
+        try {
+            if (decodedText.startsWith('http://') || decodedText.startsWith('https://')) {
+                const url = new URL(decodedText);
+                parsedSession = url.searchParams.get('sessionId') || url.searchParams.get('session') || '';
+            } else {
+                parsedSession = decodedText.trim();
+            }
+        } catch (e) {
+            parsedSession = decodedText.trim();
+        }
+
+        if (parsedSession && parsedSession.length > 0) {
+            setSessionId(parsedSession.toUpperCase());
+            setIsSessionSet(true);
+            setIsQrScannerActive(false);
+            if (navigator.vibrate) {
+                navigator.vibrate([100, 50, 100]);
+            }
+        }
     };
 
     // 3. Initialize Camera Scanning
@@ -359,7 +447,7 @@ export default function MobileScannerApp() {
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar relative">
 
-                {/* State A: Missing Session ID */}
+                /* State A: Missing Session ID */
                 {!isSessionSet ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 select-none">
                         <div className="w-full max-w-sm p-6 rounded-2xl glass-panel space-y-6 shadow-2xl relative overflow-hidden">
@@ -367,48 +455,117 @@ export default function MobileScannerApp() {
                             <div className="absolute -bottom-10 -left-10 w-24 h-24 bg-blue-500/10 rounded-full blur-xl" />
 
                             <div className="text-center space-y-2 relative">
+                                {/* Scan QR Code Switch button */}
+                                <button
+                                    onClick={() => {
+                                        setQrError('');
+                                        setIsQrScannerActive(prev => !prev);
+                                    }}
+                                    className="absolute -top-2 -right-2 p-2 hover:bg-slate-800/80 border border-slate-700 bg-slate-800/40 rounded-xl text-slate-400 hover:text-emerald-400 transition shadow-sm z-20"
+                                    title={isQrScannerActive ? "Enter session code manually" : "Scan terminal QR Code"}
+                                    type="button"
+                                >
+                                    {isQrScannerActive ? <X className="w-5 h-5" /> : <QrCode className="w-5 h-5" />}
+                                </button>
+
                                 <div className="w-14 h-14 bg-slate-800/80 rounded-2xl flex items-center justify-center mx-auto border border-slate-700 shadow-md">
-                                    <Camera className="w-6 h-6 text-emerald-400" />
+                                    {isQrScannerActive ? (
+                                        <QrCode className="w-6 h-6 text-emerald-400 animate-pulse" />
+                                    ) : (
+                                        <Camera className="w-6 h-6 text-emerald-400" />
+                                    )}
                                 </div>
                                 <h2 className="text-lg font-bold text-white tracking-tight">Connect to Sales Desk</h2>
                                 <p className="text-xs text-slate-400 max-w-[280px] mx-auto">
-                                    Enter the 5-character session code shown on your POS checkout screen.
+                                    {isQrScannerActive
+                                        ? "Point your camera at the POS checkout QR code to link instantly."
+                                        : "Enter the 5-character session code shown on your POS checkout screen."}
                                 </p>
                             </div>
 
-                            <form onSubmit={handleSessionIdSubmit} className="space-y-4 relative">
-                                <div>
-                                    <label htmlFor="sessionId" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1.5 px-0.5">
-                                        Terminal Session Code
-                                    </label>
-                                    <input
-                                        id="sessionId"
-                                        type="text"
-                                        required
-                                        maxLength={10}
-                                        value={sessionId}
-                                        onChange={(e) => setSessionId(e.target.value.toUpperCase())}
-                                        placeholder="e.g. S-9A2"
-                                        className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-4 py-3.5 text-center font-mono text-xl font-bold tracking-wider text-white uppercase placeholder-slate-600 transition-all shadow-inner"
-                                        autoComplete="off"
-                                        autoFocus
-                                    />
+                            {isQrScannerActive ? (
+                                <div className="space-y-4 relative">
+                                    <div className="relative aspect-square w-full rounded-xl overflow-hidden border border-slate-800 bg-black shadow-inner">
+                                        {qrError ? (
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center select-none text-slate-400">
+                                                <AlertCircle className="w-8 h-8 text-rose-500 mb-2" />
+                                                <p className="font-semibold text-white text-xs">{qrError}</p>
+                                                <button
+                                                    onClick={() => {
+                                                        setQrError('');
+                                                        setIsQrScannerActive(false);
+                                                        setTimeout(() => setIsQrScannerActive(true), 50);
+                                                    }}
+                                                    className="mt-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 py-1.5 px-3 rounded-lg text-[10px] font-semibold transition"
+                                                >
+                                                    Retry Camera
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <video
+                                                    ref={qrVideoRef}
+                                                    className="w-full h-full object-cover"
+                                                    playsInline
+                                                    muted
+                                                />
+                                                {/* Viewfinder scanner center target indicator */}
+                                                <div className="absolute inset-0 flex items-center justify-center bg-transparent pointer-events-none">
+                                                    <div className="w-2/3 h-2/3 border-2 border-emerald-500/20 rounded-xl relative">
+                                                        <div className="absolute -top-[2px] -left-[2px] w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
+                                                        <div className="absolute -top-[2px] -right-[2px] w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
+                                                        <div className="absolute -bottom-[2px] -left-[2px] w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
+                                                        <div className="absolute -bottom-[2px] -right-[2px] w-4 h-4 border-b-2 border-r-2 border-emerald-400 rounded-br" />
+                                                    </div>
+                                                </div>
+                                                {/* Animated Laser Scanning Line */}
+                                                <div className="absolute w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse top-1/2 -translate-y-1/2" />
+                                            </>
+                                        )}
+                                    </div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsQrScannerActive(false)}
+                                        className="w-full py-3 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 rounded-xl text-xs font-semibold transition"
+                                    >
+                                        Cancel Scanning
+                                    </button>
                                 </div>
+                            ) : (
+                                <form onSubmit={handleSessionIdSubmit} className="space-y-4 relative">
+                                    <div>
+                                        <label htmlFor="sessionId" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1.5 px-0.5">
+                                            Terminal Session Code
+                                        </label>
+                                        <input
+                                            id="sessionId"
+                                            type="text"
+                                            required
+                                            maxLength={10}
+                                            value={sessionId}
+                                            onChange={(e) => setSessionId(e.target.value.toUpperCase())}
+                                            placeholder="e.g. S-9A2"
+                                            className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-4 py-3.5 text-center font-mono text-xl font-bold tracking-wider text-white uppercase placeholder-slate-600 transition-all shadow-inner"
+                                            autoComplete="off"
+                                            autoFocus
+                                        />
+                                    </div>
 
-                                <button
-                                    type="submit"
-                                    disabled={!sessionId.trim()}
-                                    className={clsx(
-                                        'w-full py-3.5 rounded-xl font-semibold text-sm transition-all focus:outline-none flex items-center justify-center gap-2 active:scale-[0.98]',
-                                        sessionId.trim()
-                                            ? 'bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 shadow-lg shadow-emerald-950/40 text-black'
-                                            : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
-                                    )}
-                                >
-                                    <Link className="w-4 h-4" />
-                                    Establish Link
-                                </button>
-                            </form>
+                                    <button
+                                        type="submit"
+                                        disabled={!sessionId.trim()}
+                                        className={clsx(
+                                            'w-full py-3.5 rounded-xl font-semibold text-sm transition-all focus:outline-none flex items-center justify-center gap-2 active:scale-[0.98]',
+                                            sessionId.trim()
+                                                ? 'bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 shadow-lg shadow-emerald-950/40 text-black'
+                                                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                                        )}
+                                    >
+                                        <Link className="w-4 h-4" />
+                                        Establish Link
+                                    </button>
+                                </form>
+                            )}
                         </div>
 
                         {/* Quick Helper Tips */}
