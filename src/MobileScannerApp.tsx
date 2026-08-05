@@ -50,6 +50,38 @@ export default function MobileScannerApp() {
     const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
     const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+    // Request permission & list devices
+    const initCamera = async () => {
+        setCameraError('');
+        try {
+            // Explicitly request media access to trigger permission dialog
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            // Stop tracks immediately to avoid keeping the camera locked by getUserMedia
+            stream.getTracks().forEach(track => track.stop());
+
+            const codeReader = codeReaderRef.current || new BrowserMultiFormatReader();
+            codeReaderRef.current = codeReader;
+
+            const devices = await codeReader.listVideoInputDevices();
+            setVideoDevices(devices);
+
+            if (devices.length > 0) {
+                const rearDevice = devices.find(d =>
+                    d.label.toLowerCase().includes('back') ||
+                    d.label.toLowerCase().includes('rear') ||
+                    d.label.toLowerCase().includes('environment')
+                );
+                const defaultDev = rearDevice ? rearDevice.deviceId : devices[0].deviceId;
+                setSelectedDeviceId(prev => prev || defaultDev);
+            } else {
+                setCameraError('No camera devices found.');
+            }
+        } catch (err: any) {
+            console.error('Camera permissions or enumerate error:', err);
+            setCameraError(err.message || 'Could not gain access to camera devices.');
+        }
+    };
+
     // 1. Extract Session ID from URL on load
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
@@ -158,7 +190,7 @@ export default function MobileScannerApp() {
         setIsSessionSet(false);
     };
 
-    // 3. Initialize ZXing Barcode Scanning
+    // 3. Initialize Camera Scanning
     useEffect(() => {
         if (!isSessionSet || !isCameraActive) {
             if (codeReaderRef.current) {
@@ -167,30 +199,7 @@ export default function MobileScannerApp() {
             return;
         }
 
-        const codeReader = new BrowserMultiFormatReader();
-        codeReaderRef.current = codeReader;
-
-        codeReader.listVideoInputDevices()
-            .then((devices) => {
-                setVideoDevices(devices);
-
-                if (devices.length > 0) {
-                    // Attempt to find rear/back camera
-                    const rearDevice = devices.find(d =>
-                        d.label.toLowerCase().includes('back') ||
-                        d.label.toLowerCase().includes('rear') ||
-                        d.label.toLowerCase().includes('environment')
-                    );
-                    const defaultDev = rearDevice ? rearDevice.deviceId : devices[0].deviceId;
-                    setSelectedDeviceId(prev => prev || defaultDev);
-                } else {
-                    setCameraError('No camera/video feed input devices found.');
-                }
-            })
-            .catch((err) => {
-                console.error('Error listing camera devices:', err);
-                setCameraError('Could not gain access to camera devices.');
-            });
+        initCamera();
 
         return () => {
             if (codeReaderRef.current) {
@@ -292,6 +301,15 @@ export default function MobileScannerApp() {
             setSessionId(sessionId.trim().toUpperCase());
             setIsSessionSet(true);
         }
+    };
+
+    const handleRetryCamera = () => {
+        setCameraError('');
+        setIsCameraActive(false);
+        // Wait a frame & reactivate to force useEffect reload
+        setTimeout(() => {
+            setIsCameraActive(true);
+        }, 50);
     };
 
     return (
@@ -497,17 +515,17 @@ export default function MobileScannerApp() {
                                         <p className="font-semibold text-white text-sm">
                                             {cameraError ? 'Camera Access Pending' : 'Camera is Disabled'}
                                         </p>
-                                        <p className="text-xs text-slate-500 max-w-[220px]">
+                                        <p className="text-xs text-slate-550 max-w-[220px]">
                                             {cameraError || 'Activate the camera via the start toggle below to start barcode capture.'}
                                         </p>
                                     </div>
-                                    {!isCameraActive && (
+                                    {(!isCameraActive || cameraError) && (
                                         <button
-                                            onClick={() => setIsCameraActive(true)}
-                                            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2 px-4 rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-950/30"
+                                            onClick={cameraError ? handleRetryCamera : () => setIsCameraActive(true)}
+                                            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2 px-4 rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-950/30 font-bold"
                                         >
-                                            <Play className="w-3.5 h-3.5 fill-current" />
-                                            Start Camera Feed
+                                            <Play className="w-3.5 h-3.5 fill-current text-slate-950" />
+                                            {cameraError ? 'Allow/Retry Camera' : 'Start Camera Feed'}
                                         </button>
                                     )}
                                 </div>
