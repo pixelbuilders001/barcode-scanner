@@ -69,8 +69,11 @@ export default function MobileScannerApp() {
         setErrorMessage('');
 
         // Initialize peer
-        // Using default cloud PeerJS server
+        // Using default cloud PeerJS server configured for secure wss connections
         const peer = new Peer({
+            host: '0.peerjs.com',
+            port: 443,
+            secure: true,
             debug: 1 // Print only errors or keep it silent
         });
 
