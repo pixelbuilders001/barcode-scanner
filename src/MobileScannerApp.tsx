@@ -447,7 +447,7 @@ export default function MobileScannerApp() {
             {/* Main Content Area */}
             <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar relative">
 
-                /* State A: Missing Session ID */
+
                 {!isSessionSet ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 select-none">
                         <div className="w-full max-w-sm p-6 rounded-2xl glass-panel space-y-6 shadow-2xl relative overflow-hidden">
