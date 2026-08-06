@@ -66,20 +66,25 @@ export default function MobileScannerApp() {
             const codeReader = codeReaderRef.current || new BrowserMultiFormatReader();
             codeReaderRef.current = codeReader;
 
-            let devices = await codeReader.listVideoInputDevices();
-            
-            // If the devices list is empty or devices have no labels, camera permissions are not yet granted.
-            const needsPermission = devices.length === 0 || devices.every(d => !d.label);
+            let devices: MediaDeviceInfo[] = [];
+            let needsPermission = true;
+            try {
+                devices = await codeReader.listVideoInputDevices();
+                // If the devices list is empty or devices have no labels, camera permissions are not yet granted.
+                needsPermission = devices.length === 0 || devices.every(d => !d.label);
+            } catch (e) {
+                needsPermission = true;
+            }
 
             if (needsPermission) {
                 // Request stream once to prompt user for permission
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
                 // Stop tracks immediately to avoid locking the camera resource
                 stream.getTracks().forEach(track => track.stop());
-                
+
                 // Wait 300ms to allow hardware layer to release the camera channel
                 await new Promise(resolve => setTimeout(resolve, 300));
-                
+
                 // Re-list devices now that permission is granted
                 devices = await codeReader.listVideoInputDevices();
             }
@@ -302,22 +307,9 @@ export default function MobileScannerApp() {
 
     // 3. Initialize Camera Scanning
     useEffect(() => {
-        if (!isSessionSet || !isCameraActive) {
-            if (codeReaderRef.current) {
-                codeReaderRef.current.reset();
-            }
-            return;
-        }
-
-        if (videoDevices.length === 0) {
+        if (isSessionSet && isCameraActive && videoDevices.length === 0) {
             initCamera();
         }
-
-        return () => {
-            if (codeReaderRef.current) {
-                codeReaderRef.current.reset();
-            }
-        };
     }, [isSessionSet, isCameraActive, videoDevices.length]);
 
     // Bind video scanning when device changes
