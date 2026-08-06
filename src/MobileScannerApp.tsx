@@ -46,7 +46,6 @@ export default function MobileScannerApp() {
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
     const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
     const [cameraError, setCameraError] = useState<string>('');
-    const [isScanningPaused, setIsScanningPaused] = useState<boolean>(false);
 
     // Refs
     const peerRef = useRef<Peer | null>(null);
