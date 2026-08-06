@@ -46,6 +46,7 @@ export default function MobileScannerApp() {
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
     const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
     const [cameraError, setCameraError] = useState<string>('');
+    const [isScanningPaused, setIsScanningPaused] = useState<boolean>(false);
 
     // Refs
     const peerRef = useRef<Peer | null>(null);
@@ -53,6 +54,9 @@ export default function MobileScannerApp() {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
     const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const cooldownRef = useRef<boolean>(false);
+    const consecutiveEmptyFramesRef = useRef<number>(0);
+    const lastScannedBarcodeRef = useRef<string | null>(null);
     const qrVideoRef = useRef<HTMLVideoElement | null>(null);
     const qrCodeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
 
@@ -312,7 +316,26 @@ export default function MobileScannerApp() {
             (result, _err) => {
                 if (result) {
                     const barcodeText = result.getText();
+
+                    // Deduplication: require either a different barcode OR absence from the frame
+                    if (barcodeText === lastScannedBarcodeRef.current && consecutiveEmptyFramesRef.current < 15) {
+                        consecutiveEmptyFramesRef.current = 0;
+                        return;
+                    }
+
+                    consecutiveEmptyFramesRef.current = 0;
+                    lastScannedBarcodeRef.current = barcodeText;
+
+                    // Absolute safety fallback: allow scanning the same barcode again after 5 seconds
+                    setTimeout(() => {
+                        if (lastScannedBarcodeRef.current === barcodeText) {
+                            lastScannedBarcodeRef.current = null;
+                        }
+                    }, 5000);
+
                     handleScannedBarcode(barcodeText);
+                } else {
+                    consecutiveEmptyFramesRef.current += 1;
                 }
                 // Ignore normal scanning logs when barcode is not found in slot
             }
@@ -330,9 +353,10 @@ export default function MobileScannerApp() {
     // Handle successful scan
     const handleScannedBarcode = (barcode: string) => {
         // Check cooldown
-        if (cooldown) return;
+        if (cooldown || cooldownRef.current) return;
 
         // Trigger cooldown
+        cooldownRef.current = true;
         setCooldown(true);
         setLastScanned(barcode);
 
@@ -368,6 +392,7 @@ export default function MobileScannerApp() {
 
         // Clear alert badge and cooldown in 1.5s
         cooldownTimeoutRef.current = setTimeout(() => {
+            cooldownRef.current = false;
             setCooldown(false);
             setLastScanned(null);
         }, 1500);
