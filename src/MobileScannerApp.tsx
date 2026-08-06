@@ -63,15 +63,27 @@ export default function MobileScannerApp() {
     const initCamera = async () => {
         setCameraError('');
         try {
-            // Explicitly request media access to trigger permission dialog
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            // Stop tracks immediately to avoid keeping the camera locked by getUserMedia
-            stream.getTracks().forEach(track => track.stop());
-
             const codeReader = codeReaderRef.current || new BrowserMultiFormatReader();
             codeReaderRef.current = codeReader;
 
-            const devices = await codeReader.listVideoInputDevices();
+            let devices = await codeReader.listVideoInputDevices();
+            
+            // If the devices list is empty or devices have no labels, camera permissions are not yet granted.
+            const needsPermission = devices.length === 0 || devices.every(d => !d.label);
+
+            if (needsPermission) {
+                // Request stream once to prompt user for permission
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                // Stop tracks immediately to avoid locking the camera resource
+                stream.getTracks().forEach(track => track.stop());
+                
+                // Wait 300ms to allow hardware layer to release the camera channel
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // Re-list devices now that permission is granted
+                devices = await codeReader.listVideoInputDevices();
+            }
+
             setVideoDevices(devices);
 
             if (devices.length > 0) {
@@ -212,13 +224,18 @@ export default function MobileScannerApp() {
         qrCodeReaderRef.current = qrCodeReader;
         setQrError('');
 
-        // Request media access to trigger permission dialog
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
-            .then((stream) => {
-                stream.getTracks().forEach(track => track.stop());
-                return qrCodeReader.listVideoInputDevices();
-            })
-            .then((devices) => {
+        const startQrScanning = async () => {
+            try {
+                let devices = await qrCodeReader.listVideoInputDevices();
+                const needsPermission = devices.length === 0 || devices.every(d => !d.label);
+
+                if (needsPermission) {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                    stream.getTracks().forEach(track => track.stop());
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                    devices = await qrCodeReader.listVideoInputDevices();
+                }
+
                 if (devices.length === 0) {
                     setQrError('No camera devices found.');
                     return;
@@ -234,7 +251,7 @@ export default function MobileScannerApp() {
 
                 if (!qrVideoRef.current) return;
 
-                return qrCodeReader.decodeFromVideoDevice(
+                await qrCodeReader.decodeFromVideoDevice(
                     devId,
                     qrVideoRef.current,
                     (result) => {
@@ -244,11 +261,13 @@ export default function MobileScannerApp() {
                         }
                     }
                 );
-            })
-            .catch((err) => {
+            } catch (err: any) {
                 console.error('QR scanner init error:', err);
                 setQrError('Camera access denied or failed.');
-            });
+            }
+        };
+
+        startQrScanning();
 
         return () => {
             if (qrCodeReaderRef.current) {
@@ -290,14 +309,16 @@ export default function MobileScannerApp() {
             return;
         }
 
-        initCamera();
+        if (videoDevices.length === 0) {
+            initCamera();
+        }
 
         return () => {
             if (codeReaderRef.current) {
                 codeReaderRef.current.reset();
             }
         };
-    }, [isSessionSet, isCameraActive]);
+    }, [isSessionSet, isCameraActive, videoDevices.length]);
 
     // Bind video scanning when device changes
     useEffect(() => {
