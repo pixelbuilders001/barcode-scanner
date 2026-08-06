@@ -63,32 +63,18 @@ export default function MobileScannerApp() {
     const initCamera = async () => {
         setCameraError('');
         try {
+            // Explicitly request media access to trigger permission dialog
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            // Stop tracks immediately to avoid keeping the camera locked by getUserMedia
+            stream.getTracks().forEach(track => track.stop());
+
+            // Wait 300ms to allow hardware layer to release the camera channel
+            await new Promise(resolve => setTimeout(resolve, 300));
+
             const codeReader = codeReaderRef.current || new BrowserMultiFormatReader();
             codeReaderRef.current = codeReader;
 
-            let devices: MediaDeviceInfo[] = [];
-            let needsPermission = true;
-            try {
-                devices = await codeReader.listVideoInputDevices();
-                // If the devices list is empty or devices have no labels, camera permissions are not yet granted.
-                needsPermission = devices.length === 0 || devices.every(d => !d.label);
-            } catch (e) {
-                needsPermission = true;
-            }
-
-            if (needsPermission) {
-                // Request stream once to prompt user for permission
-                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                // Stop tracks immediately to avoid locking the camera resource
-                stream.getTracks().forEach(track => track.stop());
-
-                // Wait 300ms to allow hardware layer to release the camera channel
-                await new Promise(resolve => setTimeout(resolve, 300));
-
-                // Re-list devices now that permission is granted
-                devices = await codeReader.listVideoInputDevices();
-            }
-
+            const devices = await codeReader.listVideoInputDevices();
             setVideoDevices(devices);
 
             if (devices.length > 0) {
@@ -307,10 +293,21 @@ export default function MobileScannerApp() {
 
     // 3. Initialize Camera Scanning
     useEffect(() => {
-        if (isSessionSet && isCameraActive && videoDevices.length === 0) {
-            initCamera();
+        if (!isSessionSet || !isCameraActive) {
+            if (codeReaderRef.current) {
+                codeReaderRef.current.reset();
+            }
+            return;
         }
-    }, [isSessionSet, isCameraActive, videoDevices.length]);
+
+        initCamera();
+
+        return () => {
+            if (codeReaderRef.current) {
+                codeReaderRef.current.reset();
+            }
+        };
+    }, [isSessionSet, isCameraActive]);
 
     // Bind video scanning when device changes
     useEffect(() => {
