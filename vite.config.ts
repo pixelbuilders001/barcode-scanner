@@ -10,7 +10,7 @@ export default defineConfig({
   ],
   server: {
     allowedHosts: [
-      'leaf-sponsored-outside-showtimes.trycloudflare.com'
+      'encourage-authority-buf-small.trycloudflare.com'
     ]
   }
 })

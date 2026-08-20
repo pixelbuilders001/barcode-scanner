@@ -69,40 +69,7 @@ export default function MobileScannerApp() {
     const qrVideoRef = useRef<HTMLVideoElement | null>(null);
     const qrCodeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
 
-    // Request permission & list devices
-    const initCamera = async () => {
-        setCameraError('');
-        try {
-            // Explicitly request media access to trigger permission dialog
-            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-            // Stop tracks immediately to avoid keeping the camera locked by getUserMedia
-            stream.getTracks().forEach(track => track.stop());
 
-            // Wait 300ms to allow hardware layer to release the camera channel
-            await new Promise(resolve => setTimeout(resolve, 300));
-
-            const codeReader = codeReaderRef.current || new BrowserMultiFormatReader();
-            codeReaderRef.current = codeReader;
-
-            const devices = await codeReader.listVideoInputDevices();
-            setVideoDevices(devices);
-
-            if (devices.length > 0) {
-                const rearDevice = devices.find(d =>
-                    d.label.toLowerCase().includes('back') ||
-                    d.label.toLowerCase().includes('rear') ||
-                    d.label.toLowerCase().includes('environment')
-                );
-                const defaultDev = rearDevice ? rearDevice.deviceId : devices[0].deviceId;
-                setSelectedDeviceId(prev => prev || defaultDev);
-            } else {
-                setCameraError('No camera devices found.');
-            }
-        } catch (err: any) {
-            console.error('Camera permissions or enumerate error:', err);
-            setCameraError(err.message || 'Could not gain access to camera devices.');
-        }
-    };
 
     // 1. Extract Session ID from URL on load
     useEffect(() => {
@@ -276,11 +243,16 @@ export default function MobileScannerApp() {
             if (qrCodeReaderRef.current) {
                 qrCodeReaderRef.current.reset();
             }
+            if (qrVideoRef.current && qrVideoRef.current.srcObject) {
+                const stream = qrVideoRef.current.srcObject as MediaStream;
+                stream.getTracks().forEach(track => track.stop());
+                qrVideoRef.current.srcObject = null;
+            }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isQrScannerActive, isSessionSet]);
 
-    const handleQrDecoded = (decodedText: string) => {
+    const handleQrDecoded = async (decodedText: string) => {
         console.log('QR Code decoded:', decodedText);
         let parsedSession = '';
         try {
@@ -295,86 +267,165 @@ export default function MobileScannerApp() {
         }
 
         if (parsedSession && parsedSession.length > 0) {
+            // 1. Immediately reset QR code reader & stop video tracks
+            if (qrCodeReaderRef.current) {
+                try {
+                    qrCodeReaderRef.current.reset();
+                } catch { }
+            }
+            if (qrVideoRef.current && qrVideoRef.current.srcObject) {
+                const stream = qrVideoRef.current.srcObject as MediaStream;
+                stream.getTracks().forEach(track => {
+                    track.stop();
+                    track.enabled = false;
+                });
+                qrVideoRef.current.srcObject = null;
+            }
+
+            // 2. Momentarily deactivate camera state so barcode scanner triggers a clean fresh activation
+            setIsCameraActive(false);
+
+            // 3. Wait 300ms for browser hardware layer to release the camera channel
+            await new Promise(resolve => setTimeout(resolve, 300));
+
+            // 4. Update session state to mount barcode scanner view
             setSessionId(parsedSession.toUpperCase());
             setIsSessionSet(true);
             setIsQrScannerActive(false);
             if (navigator.vibrate) {
                 navigator.vibrate([100, 50, 100]);
             }
+
+            // 5. Activate camera state after view mounts to trigger barcode scanner effect
+            setTimeout(() => {
+                setIsCameraActive(true);
+            }, 100);
         }
     };
 
-    // 3. Initialize Camera Scanning
+    // Unified Barcode Scanner Camera & Decoding Lifecycle Hook
     useEffect(() => {
         if (!isSessionSet || !isCameraActive) {
             if (codeReaderRef.current) {
-                codeReaderRef.current.reset();
+                try { codeReaderRef.current.reset(); } catch { }
             }
             setIsFlashOn(false);
             return;
         }
 
-        initCamera();
-
-        return () => {
-            if (codeReaderRef.current) {
-                codeReaderRef.current.reset();
-            }
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isSessionSet, isCameraActive]);
-
-    // Bind video scanning when device changes
-    useEffect(() => {
-        if (!isSessionSet || !selectedDeviceId || !isCameraActive || !videoRef.current) return;
-
-        const codeReader = codeReaderRef.current;
-        if (!codeReader) return;
+        let cancelled = false;
+        const codeReader = codeReaderRef.current || new BrowserMultiFormatReader();
+        codeReaderRef.current = codeReader;
 
         setCameraError('');
 
-        // Start decoding from video device
-        codeReader.decodeFromVideoDevice(
-            selectedDeviceId,
-            videoRef.current,
-            (result, _err) => {
-                if (result) {
-                    const barcodeText = result.getText();
+        const decodeCallback = (result: any, _err: any) => {
+            if (cancelled) return;
+            if (result) {
+                const barcodeText = result.getText();
 
-                    // Deduplication: require either a different barcode OR absence from the frame
-                    if (barcodeText === lastScannedBarcodeRef.current && consecutiveEmptyFramesRef.current < 15) {
-                        consecutiveEmptyFramesRef.current = 0;
-                        return;
-                    }
-
+                // Deduplication: require either a different barcode OR absence from the frame
+                if (barcodeText === lastScannedBarcodeRef.current && consecutiveEmptyFramesRef.current < 15) {
                     consecutiveEmptyFramesRef.current = 0;
-                    lastScannedBarcodeRef.current = barcodeText;
-
-                    // Absolute safety fallback: allow scanning the same barcode again after 5 seconds
-                    setTimeout(() => {
-                        if (lastScannedBarcodeRef.current === barcodeText) {
-                            lastScannedBarcodeRef.current = null;
-                        }
-                    }, 5000);
-
-                    handleScannedBarcode(barcodeText);
-                } else {
-                    consecutiveEmptyFramesRef.current += 1;
+                    return;
                 }
-                // Ignore normal scanning logs when barcode is not found in slot
+
+                consecutiveEmptyFramesRef.current = 0;
+                lastScannedBarcodeRef.current = barcodeText;
+
+                // Absolute safety fallback: allow scanning the same barcode again after 5 seconds
+                setTimeout(() => {
+                    if (lastScannedBarcodeRef.current === barcodeText) {
+                        lastScannedBarcodeRef.current = null;
+                    }
+                }, 5000);
+
+                handleScannedBarcode(barcodeText);
+            } else {
+                consecutiveEmptyFramesRef.current += 1;
             }
-        ).catch((err) => {
-            console.error('Error starting video decode:', err);
-            // Frequently on iOS/Chrome if permission is blocked or camera is busy
-            setCameraError('Could not launch camera feed. Check permissions.');
-        });
+        };
+
+        const startScanningFlow = async () => {
+            // 1. Enumerate video devices if list is empty
+            let targetDeviceId = selectedDeviceId;
+            try {
+                let devices = await codeReader.listVideoInputDevices();
+                if (devices.length === 0 || devices.every(d => !d.label)) {
+                    const tempStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                    tempStream.getTracks().forEach(t => t.stop());
+                    await new Promise(r => setTimeout(r, 150));
+                    devices = await codeReader.listVideoInputDevices();
+                }
+
+                if (!cancelled) {
+                    setVideoDevices(devices);
+                }
+
+                if (devices.length > 0) {
+                    if (!targetDeviceId) {
+                        const rearDevice = devices.find(d =>
+                            d.label.toLowerCase().includes('back') ||
+                            d.label.toLowerCase().includes('rear') ||
+                            d.label.toLowerCase().includes('environment')
+                        );
+                        targetDeviceId = rearDevice ? rearDevice.deviceId : devices[0].deviceId;
+                        if (!cancelled) {
+                            setSelectedDeviceId(targetDeviceId);
+                        }
+                    }
+                } else {
+                    if (!cancelled) setCameraError('No camera devices found.');
+                    return;
+                }
+            } catch (err: any) {
+                console.error('Camera enumeration error:', err);
+                if (!cancelled) setCameraError(err.message || 'Could not gain access to camera.');
+                return;
+            }
+
+            if (cancelled || !targetDeviceId) return;
+
+            // 2. Wait for HTMLVideoElement to mount in DOM
+            for (let i = 0; i < 10 && !cancelled && !videoRef.current; i++) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+            if (cancelled || !videoRef.current) return;
+
+            // 3. Retry loop to bind video device stream to video element
+            for (let attempt = 0; attempt < 6 && !cancelled; attempt++) {
+                if (attempt > 0) {
+                    await new Promise(r => setTimeout(r, 350));
+                }
+                if (cancelled || !videoRef.current) return;
+
+                try {
+                    await codeReader.decodeFromVideoDevice(
+                        targetDeviceId,
+                        videoRef.current,
+                        decodeCallback
+                    );
+                    return; // Successfully started video decoding!
+                } catch (err) {
+                    console.warn(`[Barcode Scanner] Decode attempt ${attempt + 1}/6 failed:`, err);
+                    if (attempt === 5 && !cancelled) {
+                        setCameraError('Could not launch camera feed. Check permissions.');
+                    }
+                }
+            }
+        };
+
+        startScanningFlow();
 
         return () => {
-            codeReader.reset();
+            cancelled = true;
+            try {
+                codeReader.reset();
+            } catch { }
             setIsFlashOn(false);
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedDeviceId, isSessionSet, isCameraActive]);
+    }, [isSessionSet, isCameraActive, selectedDeviceId]);
 
     // Handle successful scan
     const handleScannedBarcode = (barcode: string) => {
