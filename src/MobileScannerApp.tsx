@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import Peer from 'peerjs';
+import { supabase } from './lib/supabase';
 import { BrowserMultiFormatReader } from '@zxing/library';
 import {
     WifiOff,
@@ -19,7 +19,6 @@ import {
     SwitchCamera,
     ScanLine,
     Wifi,
-    RefreshCw,
     ShieldCheck,
     Store,
     KeyRound,
@@ -37,7 +36,7 @@ interface ScanItem {
 
 export default function MobileScannerApp() {
     // Connection State
-    const [sessionId, setSessionId] = useState<string>('');
+    const [sessionId, setSessionId] = useState<string>('S-');
     const [isSessionSet, setIsSessionSet] = useState<boolean>(false);
     const [connectionStatus, setConnectionStatus] = useState<'offline' | 'connecting' | 'live'>('offline');
     const [errorMessage, setErrorMessage] = useState<string>('');
@@ -58,8 +57,7 @@ export default function MobileScannerApp() {
     const [isTorchSupported, setIsTorchSupported] = useState<boolean>(true);
 
     // Refs
-    const peerRef = useRef<Peer | null>(null);
-    const connRef = useRef<any | null>(null);
+    const channelRef = useRef<any | null>(null);
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const codeReaderRef = useRef<BrowserMultiFormatReader | null>(null);
     const cooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,44 +69,111 @@ export default function MobileScannerApp() {
 
 
 
+    // Camera Permission Gate State
+    const [cameraPermissionGranted, setCameraPermissionGranted] = useState<boolean | null>(null);
+
+    // Check camera permission status on initial launch
+    useEffect(() => {
+        const checkPermission = async () => {
+            try {
+                if (navigator.permissions && navigator.permissions.query) {
+                    const status = await navigator.permissions.query({ name: 'camera' as PermissionName });
+                    if (status.state === 'granted') {
+                        setCameraPermissionGranted(true);
+                        return;
+                    }
+                }
+            } catch {
+                // Fallback for browsers that don't support camera permission query
+            }
+
+            const savedGrant = localStorage.getItem('camera_permission_granted');
+            if (savedGrant === 'true') {
+                setCameraPermissionGranted(true);
+            } else {
+                setCameraPermissionGranted(false);
+            }
+        };
+        checkPermission();
+    }, []);
+
+    const grantCameraAccess = async () => {
+        setCameraError('');
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+            stream.getTracks().forEach(track => track.stop());
+
+            await new Promise(resolve => setTimeout(resolve, 200));
+
+            localStorage.setItem('camera_permission_granted', 'true');
+            setCameraPermissionGranted(true);
+            setIsCameraActive(true);
+        } catch (err: any) {
+            console.error('Camera permission request error:', err);
+            setCameraError('Camera access was denied. Please allow camera permissions in your browser settings.');
+            setCameraPermissionGranted(false);
+        }
+    };
+
     // 1. Extract Session ID from URL on load
     useEffect(() => {
         const params = new URLSearchParams(window.location.search);
         const sessionParam = params.get('session') || params.get('sessionId');
         if (sessionParam && sessionParam.trim().length > 0) {
-            const sanitized = sessionParam.trim().toUpperCase();
+            let sanitized = sessionParam.trim().toUpperCase();
+            if (!sanitized.startsWith('S-')) {
+                sanitized = 'S-' + (sanitized.startsWith('S') ? sanitized.slice(1) : sanitized);
+            }
             setSessionId(sanitized);
             setIsSessionSet(true);
         }
     }, []);
 
-    // 2. Initialize PeerJS connection when isSessionSet becomes true
+    const handleSessionInputChange = (val: string) => {
+        let raw = val.toUpperCase().trim();
+        if (!raw || raw === 'S' || raw === 'S-') {
+            setSessionId('S-');
+            return;
+        }
+        if (!raw.startsWith('S-')) {
+            if (raw.startsWith('S')) {
+                raw = 'S-' + raw.slice(1);
+            } else {
+                raw = 'S-' + raw;
+            }
+        }
+        if (raw.length > 7) {
+            raw = raw.slice(0, 7);
+        }
+        setSessionId(raw);
+    };
+
+    // 2. Initialize Supabase Realtime connection when isSessionSet becomes true
     useEffect(() => {
         if (!isSessionSet || !sessionId) return;
 
         setConnectionStatus('connecting');
         setErrorMessage('');
 
-        // Initialize peer
-        // Using default cloud PeerJS server configured for secure wss connections
-        const peer = new Peer({
-            host: '0.peerjs.com',
-            port: 443,
-            secure: true,
-            debug: 1 // Print only errors or keep it silent
+        const targetChannelName = `room:POS-${sessionId}`;
+        console.log(`Connecting to Supabase Realtime Channel: ${targetChannelName}`);
+
+        const channel = supabase.channel(targetChannelName, {
+            config: { broadcast: { self: true } }
         });
 
-        peerRef.current = peer;
+        channelRef.current = channel;
 
-        peer.on('open', (id) => {
-            console.log('Client connected as: ', id);
-            connectToHost(peer, sessionId);
-        });
-
-        peer.on('error', (err) => {
-            console.error('PeerJS global error:', err);
-            setConnectionStatus('offline');
-            setErrorMessage(`Network error: ${err.message || err.type}`);
+        channel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                console.log('Supabase Realtime channel connected live!');
+                setConnectionStatus('live');
+                setErrorMessage('');
+            } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+                console.warn('Supabase channel status:', status);
+                setConnectionStatus('offline');
+                setErrorMessage(`Connection issue (${status}). Tap Reconnect.`);
+            }
         });
 
         // Cleanup on unmount or session reset
@@ -118,48 +183,10 @@ export default function MobileScannerApp() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isSessionSet, sessionId]);
 
-    // Connect client peer to host peer
-    const connectToHost = (peer: Peer, sid: string) => {
-        const targetHostId = `POS-${sid}`;
-        console.log(`Connecting to WebRTC Host: ${targetHostId}`);
-
-        const conn = peer.connect(targetHostId, {
-            reliable: true
-        });
-
-        connRef.current = conn;
-
-        conn.on('open', () => {
-            console.log('WebRTC connection established successfully!');
-            setConnectionStatus('live');
-            setErrorMessage('');
-        });
-
-        conn.on('data', (data) => {
-            // Host might send control signals or acknowledgment
-            console.log('Received data from host:', data);
-        });
-
-        conn.on('close', () => {
-            console.log('Remote host closed reference connection');
-            setConnectionStatus('offline');
-        });
-
-        conn.on('error', (err) => {
-            console.error('WebRTC connection error:', err);
-            setConnectionStatus('offline');
-            setErrorMessage('Failed to connect to host. Make sure POS is open & online.');
-        });
-    };
-
     const cleanupConnection = () => {
-        if (connRef.current) {
-            connRef.current.close();
-            connRef.current = null;
-        }
-        if (peerRef.current) {
-            peerRef.current.destroy();
-            peerRef.current = null;
+        if (channelRef.current) {
+            supabase.removeChannel(channelRef.current);
+            channelRef.current = null;
         }
         setConnectionStatus('offline');
     };
@@ -451,13 +478,17 @@ export default function MobileScannerApp() {
             status: 'pending'
         };
 
-        // Send via WebRTC DataChannel
-        if (connRef.current && connectionStatus === 'live') {
+        // Send via Supabase Realtime Channel
+        if (channelRef.current) {
             try {
-                connRef.current.send(barcode);
+                channelRef.current.send({
+                    type: 'broadcast',
+                    event: 'scan',
+                    payload: { barcode, timestamp: Date.now() }
+                });
                 newScan.status = 'sent';
             } catch (err) {
-                console.error('WebRTC send error:', err);
+                console.error('Supabase broadcast error:', err);
                 newScan.status = 'failed';
             }
         } else {
@@ -543,7 +574,48 @@ export default function MobileScannerApp() {
             {/* Main Content Area */}
             <main className="relative z-10 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
 
-                {!isSessionSet ? (
+                {cameraPermissionGranted === false ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-6 select-none animate-fade-up">
+                        <div className="w-full max-w-sm p-7 rounded-3xl glass-panel space-y-6 shadow-2xl relative overflow-hidden text-center border border-white/10">
+                            <div className="absolute -top-12 -right-12 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl" />
+                            <div className="absolute -bottom-12 -left-12 w-32 h-32 bg-teal-500/10 rounded-full blur-3xl" />
+
+                            <div className="relative mx-auto w-16 h-16 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shadow-xl shadow-emerald-950/50">
+                                <Camera className="w-8 h-8 animate-pulse" />
+                            </div>
+
+                            <div className="space-y-2">
+                                <h2 className="text-xl font-bold text-white tracking-tight">
+                                    Camera Access Required
+                                </h2>
+                                <p className="text-xs text-slate-400 leading-relaxed max-w-[270px] mx-auto">
+                                    To scan terminal QR codes and live product barcodes, please grant camera access permission.
+                                </p>
+                            </div>
+
+                            {cameraError && (
+                                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs flex items-center gap-2 text-left">
+                                    <AlertCircle className="w-4 h-4 flex-none" />
+                                    <span>{cameraError}</span>
+                                </div>
+                            )}
+
+                            <button
+                                type="button"
+                                onClick={grantCameraAccess}
+                                className="w-full py-4 rounded-2xl font-bold text-sm bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/25 shadow-lg shadow-emerald-950/40 transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                            >
+                                <ShieldCheck className="w-4 h-4" />
+                                Allow Camera Access
+                            </button>
+
+                            <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-500 font-medium">
+                                <ShieldCheck className="w-3 h-3 text-emerald-500/70" />
+                                <span>Camera is used strictly for in-browser barcode decoding</span>
+                            </div>
+                        </div>
+                    </div>
+                ) : !isSessionSet ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 select-none">
                         <div className="w-full max-w-sm p-6 sm:p-7 rounded-3xl glass-panel space-y-6 shadow-2xl relative overflow-hidden animate-fade-up">
                             <div className="absolute -top-10 -right-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl" />
@@ -565,11 +637,13 @@ export default function MobileScannerApp() {
                             <div className="text-center space-y-3 relative">
                                 <div className="relative mx-auto w-fit">
                                     <div className="absolute -inset-3 rounded-full bg-emerald-500/15 blur-2xl" />
-                                    <img
-                                        src="/applogo.png"
-                                        alt="POS Scanner"
-                                        className="relative w-16 h-16 rounded-2xl object-cover ring-1 ring-emerald-500/30 shadow-xl shadow-emerald-950/40"
-                                    />
+                                    <div className="relative w-16 h-16 p-1.5 rounded-2xl bg-slate-900/90 ring-1 ring-emerald-500/30 shadow-xl shadow-emerald-950/40 flex items-center justify-center overflow-hidden">
+                                        <img
+                                            src="/applogo.png"
+                                            alt="POS Scanner"
+                                            className="w-full h-full object-contain"
+                                        />
+                                    </div>
                                 </div>
                                 <div>
                                     <h2 className="text-lg font-bold text-white tracking-tight">
@@ -634,16 +708,16 @@ export default function MobileScannerApp() {
                             ) : (
                                 <form onSubmit={handleSessionIdSubmit} className="space-y-4 relative">
                                     <div>
-                                        <label htmlFor="sessionId" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 px-0.5">
+                                        {/* <label htmlFor="sessionId" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 px-0.5">
                                             Terminal Session Code
-                                        </label>
+                                        </label> */}
                                         <input
                                             id="sessionId"
                                             type="text"
                                             required
-                                            maxLength={10}
+                                            maxLength={7}
                                             value={sessionId}
-                                            onChange={(e) => setSessionId(e.target.value.toUpperCase())}
+                                            onChange={(e) => handleSessionInputChange(e.target.value)}
                                             placeholder="S-9A2"
                                             className="w-full bg-slate-950/80 border border-white/10 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-4 text-center font-mono text-2xl font-bold tracking-[0.3em] text-white uppercase placeholder-slate-600 transition-all shadow-inner"
                                             autoComplete="off"
@@ -653,10 +727,10 @@ export default function MobileScannerApp() {
 
                                     <button
                                         type="submit"
-                                        disabled={!sessionId.trim()}
+                                        disabled={!sessionId.trim() || sessionId.trim() === 'S-'}
                                         className={clsx(
                                             'group w-full py-4 rounded-2xl font-bold text-sm transition-all focus:outline-none flex items-center justify-center gap-2 active:scale-[0.98]',
-                                            sessionId.trim()
+                                            sessionId.trim() && sessionId.trim() !== 'S-'
                                                 ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/25 shadow-lg shadow-emerald-950/40'
                                                 : 'bg-white/5 text-slate-600 cursor-not-allowed border border-white/10'
                                         )}
@@ -679,49 +753,49 @@ export default function MobileScannerApp() {
                                 </h3>
                             </div>
 
-                            <div className="relative rounded-2xl glass-card p-5">
+                            <div className="relative rounded-2xl glass-card p-4">
                                 {/* Vertical connector line */}
-                                <div className="absolute left-[26px] top-8 bottom-8 w-px bg-gradient-to-b from-emerald-500/40 via-white/10 to-white/5" />
+                                <div className="absolute left-[20px] top-6 bottom-6 w-px bg-gradient-to-b from-emerald-500/40 via-white/10 to-white/5" />
 
-                                <ol className="space-y-5 relative">
-                                    <li className="flex gap-3.5">
-                                        <div className="relative flex-none w-[52px] flex flex-col items-center">
-                                            <span className="w-[52px] h-[52px] rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
-                                                <Store className="w-5 h-5" />
+                                <ol className="space-y-3.5 relative">
+                                    <li className="flex gap-3">
+                                        <div className="relative flex-none w-[28px] flex flex-col items-center">
+                                            <span className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                                                <Store className="w-3.5 h-3.5" />
                                             </span>
                                         </div>
                                         <div className="pt-0.5">
-                                            <p className="text-sm font-semibold text-white">Open your POS terminal</p>
-                                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                                                Start a checkout on the sales desk and note the session code shown on screen (e.g. <code className="font-mono text-emerald-400 bg-white/5 px-1 py-0.5 rounded">S-9A2</code>).
+                                            <p className="text-xs font-semibold text-white">1. Open POS Terminal</p>
+                                            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                                Get the session code shown on your POS checkout screen.
                                             </p>
                                         </div>
                                     </li>
 
-                                    <li className="flex gap-3.5">
-                                        <div className="relative flex-none w-[52px] flex flex-col items-center">
-                                            <span className="w-[52px] h-[52px] rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
-                                                <KeyRound className="w-5 h-5" />
+                                    <li className="flex gap-3">
+                                        <div className="relative flex-none w-[28px] flex flex-col items-center">
+                                            <span className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                                                <KeyRound className="w-3.5 h-3.5" />
                                             </span>
                                         </div>
                                         <div className="pt-0.5">
-                                            <p className="text-sm font-semibold text-white">Link this phone</p>
-                                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                                                Tap the QR icon above to scan the terminal's QR code, or enter the session code manually and press <span className="text-emerald-400 font-semibold">Establish Link</span>.
+                                            <p className="text-xs font-semibold text-white">2. Link Phone</p>
+                                            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                                Scan the terminal QR code or enter your code above.
                                             </p>
                                         </div>
                                     </li>
 
-                                    <li className="flex gap-3.5">
-                                        <div className="relative flex-none w-[52px] flex flex-col items-center">
-                                            <span className="w-[52px] h-[52px] rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
-                                                <ScanBarcode className="w-5 h-5" />
+                                    <li className="flex gap-3">
+                                        <div className="relative flex-none w-[28px] flex flex-col items-center">
+                                            <span className="w-7 h-7 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                                                <ScanBarcode className="w-3.5 h-3.5" />
                                             </span>
                                         </div>
                                         <div className="pt-0.5">
-                                            <p className="text-sm font-semibold text-white">Scan & checkout</p>
-                                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                                                Point your camera at any product barcode. Each scan is sent to your POS instantly over a secure WebRTC link.
+                                            <p className="text-xs font-semibold text-white">3. Scan Barcodes</p>
+                                            <p className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                                                Point camera at product barcodes to instantly add items to cart.
                                             </p>
                                         </div>
                                     </li>
@@ -730,7 +804,7 @@ export default function MobileScannerApp() {
 
                             <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-500 select-none">
                                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" />
-                                <span>Direct peer-to-peer • No data leaves your store network</span>
+                                <span>Secure live connection • Instant cart sync</span>
                             </div>
                         </div>
 
@@ -1051,13 +1125,16 @@ export default function MobileScannerApp() {
             </main>
 
             {/* Footer Info Details */}
-            <footer className="relative z-10 text-center py-2.5 select-none text-[10px] border-t border-white/5 bg-slate-950/50 text-slate-600 font-mono tracking-widest flex-none flex items-center justify-center gap-2">
-                <span>POS SCANNER PWA © 2026</span>
-                <span className="w-1 h-1 rounded-full bg-slate-700" />
-                <span className="flex items-center gap-1 text-slate-500">
-                    <RefreshCw className="w-3 h-3" />
-                    RTC DATA CAPTURE
-                </span>
+            <footer className="relative z-10 text-center py-2.5 select-none text-[11px] border-t border-white/5 bg-slate-950/80 text-slate-400 flex-none flex items-center justify-center gap-1.5 font-medium">
+                <span>Designed & developed by</span>
+                <a
+                    // href="https://pixelbuilder.in"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-emerald-400 font-semibold hover:underline"
+                >
+                    pixelbuilder.in
+                </a>
             </footer>
         </div>
     );

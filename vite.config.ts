@@ -10,7 +10,7 @@ export default defineConfig({
   ],
   server: {
     allowedHosts: [
-      'encourage-authority-buf-small.trycloudflare.com'
+      'msgstr-debate-tomatoes-engaged.trycloudflare.com'
     ]
   }
 })
