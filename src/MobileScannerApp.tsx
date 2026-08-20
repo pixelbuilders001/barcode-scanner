@@ -627,6 +627,8 @@ export default function MobileScannerApp() {
                 <div className="absolute -bottom-36 -left-28 w-[30rem] h-[30rem] rounded-full bg-blue-600/10 blur-3xl animate-glow-pulse [animation-delay:1.5s]" />
             </div>
 
+
+
             {/* Main Content Area */}
             <main className="relative z-10 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
 
@@ -672,7 +674,24 @@ export default function MobileScannerApp() {
                         </div>
                     </div>
                 ) : !isSessionSet ? (
-                    <div className="flex-1 flex flex-col items-center justify-center p-6 select-none">
+                    <div className="flex-1 flex flex-col items-center justify-between p-4 sm:p-6 select-none">
+                        {/* Top Header Bar */}
+                        <div className="w-full max-w-sm flex items-center justify-between py-2 px-1 select-none flex-none mb-2">
+                            <div className="flex items-center gap-2">
+
+                            </div>
+                            {!isAppInstalled && (
+                                <button
+                                    onClick={handleInstallPwa}
+                                    type="button"
+                                    className="flex items-center gap-1.5 px-3 py-1.5 hover:bg-emerald-500/25 border border-emerald-500/40 bg-emerald-500/15 rounded-full text-emerald-300 text-xs font-bold transition-all active:scale-95 shadow-sm"
+                                    title="Download App"
+                                >
+                                    <Download className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                                    <span className="text-[11px]">Install App</span>
+                                </button>
+                            )}
+                        </div>
                         <div className="w-full max-w-sm p-6 sm:p-7 rounded-3xl glass-panel space-y-6 shadow-2xl relative overflow-hidden animate-fade-up">
                             <div className="absolute -top-10 -right-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl" />
                             <div className="absolute -bottom-10 -left-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl" />
@@ -798,20 +817,6 @@ export default function MobileScannerApp() {
                             )}
                         </div>
 
-                        {/* Download PWA CTA button if not installed */}
-                        {!isAppInstalled && (
-                            <div className="w-full max-w-sm mt-4 animate-fade-up">
-                                <button
-                                    type="button"
-                                    onClick={handleInstallPwa}
-                                    className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500/20 via-teal-500/15 to-emerald-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-emerald-950/30 active:scale-[0.98]"
-                                >
-                                    <Download className="w-4 h-4 text-emerald-400 animate-bounce" />
-                                    <span>Download App on Phone</span>
-                                </button>
-                            </div>
-                        )}
-
                         {/* How to use steps */}
                         <div className="w-full max-w-sm mt-8 space-y-4 animate-fade-up" style={{ animationDelay: '150ms' }}>
                             <div className="flex items-center gap-2 px-1">
@@ -904,6 +909,17 @@ export default function MobileScannerApp() {
                                 </div>
                             </div>
                             <div className="flex items-center gap-2">
+                                {!isAppInstalled && (
+                                    <button
+                                        onClick={handleInstallPwa}
+                                        type="button"
+                                        className="flex items-center gap-1.5 px-2.5 py-1.5 hover:bg-emerald-500/25 border border-emerald-500/40 bg-emerald-500/15 rounded-full text-emerald-300 text-xs font-bold transition-all active:scale-95"
+                                        title="Download App"
+                                    >
+                                        <Download className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                                        <span className="text-[11px]">Install App</span>
+                                    </button>
+                                )}
                                 {connectionStatus !== 'live' && (
                                     <button
                                         onClick={handleReconnect}
