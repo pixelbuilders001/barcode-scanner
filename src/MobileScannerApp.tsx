@@ -13,9 +13,17 @@ import {
     History,
     Link,
     LogOut,
-    Sparkles,
     QrCode,
-    X
+    X,
+    Zap,
+    SwitchCamera,
+    ScanLine,
+    Wifi,
+    RefreshCw,
+    ShieldCheck,
+    Store,
+    KeyRound,
+    ScanBarcode
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -46,6 +54,8 @@ export default function MobileScannerApp() {
     const [selectedDeviceId, setSelectedDeviceId] = useState<string>('');
     const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
     const [cameraError, setCameraError] = useState<string>('');
+    const [isFlashOn, setIsFlashOn] = useState<boolean>(false);
+    const [isTorchSupported, setIsTorchSupported] = useState<boolean>(true);
 
     // Refs
     const peerRef = useRef<Peer | null>(null);
@@ -138,6 +148,7 @@ export default function MobileScannerApp() {
         return () => {
             cleanupConnection();
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isSessionSet, sessionId]);
 
     // Connect client peer to host peer
@@ -200,6 +211,7 @@ export default function MobileScannerApp() {
     const handleDisconnect = () => {
         cleanupConnection();
         setIsSessionSet(false);
+        setIsFlashOn(false);
     };
 
     // 2b. Initialize QR Scanner on Connection Screen
@@ -265,6 +277,7 @@ export default function MobileScannerApp() {
                 qrCodeReaderRef.current.reset();
             }
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isQrScannerActive, isSessionSet]);
 
     const handleQrDecoded = (decodedText: string) => {
@@ -277,7 +290,7 @@ export default function MobileScannerApp() {
             } else {
                 parsedSession = decodedText.trim();
             }
-        } catch (e) {
+        } catch {
             parsedSession = decodedText.trim();
         }
 
@@ -297,6 +310,7 @@ export default function MobileScannerApp() {
             if (codeReaderRef.current) {
                 codeReaderRef.current.reset();
             }
+            setIsFlashOn(false);
             return;
         }
 
@@ -307,6 +321,7 @@ export default function MobileScannerApp() {
                 codeReaderRef.current.reset();
             }
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isSessionSet, isCameraActive]);
 
     // Bind video scanning when device changes
@@ -356,7 +371,9 @@ export default function MobileScannerApp() {
 
         return () => {
             codeReader.reset();
+            setIsFlashOn(false);
         };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [selectedDeviceId, isSessionSet, isCameraActive]);
 
     // Handle successful scan
@@ -434,92 +451,90 @@ export default function MobileScannerApp() {
         }, 50);
     };
 
-    return (
-        <div className="flex flex-col min-h-screen bg-slate-900 text-slate-100 max-h-screen overflow-hidden">
-            {/* Top Banner Header */}
-            <header className="flex items-center justify-between px-5 py-4 border-b border-slate-800 bg-slate-950/80 backdrop-blur-md z-10 select-none">
-                <div className="flex items-center gap-2">
-                    <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                        <Sparkles className="w-5 h-5 animate-pulse" />
-                    </div>
-                    <div>
-                        <h1 className="font-bold text-base tracking-tight text-white">POS Scanner</h1>
-                        <p className="text-[10px] text-slate-400">Low-Latency WebRTC Link</p>
-                    </div>
-                </div>
+    const toggleFlash = () => {
+        const video = videoRef.current;
+        if (!video) return;
+        const track = (video.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
+        if (!track) return;
+        const next = !isFlashOn;
+        const constraints = { advanced: [{ torch: next }] } as unknown as MediaTrackConstraints;
+        try {
+            track.applyConstraints(constraints).then(
+                () => {
+                    setIsFlashOn(next);
+                    setIsTorchSupported(true);
+                },
+                () => {
+                    setIsTorchSupported(false);
+                }
+            );
+        } catch {
+            setIsTorchSupported(false);
+        }
+    };
 
-                {/* Live Status Indicator */}
-                {isSessionSet && (
-                    <div className="flex items-center gap-3">
-                        <div className={clsx(
-                            'flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold select-none border shadow-lg',
-                            connectionStatus === 'live' && 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 shadow-emerald-950/20',
-                            connectionStatus === 'connecting' && 'bg-amber-500/10 text-amber-400 border-amber-500/30 animate-pulse',
-                            connectionStatus === 'offline' && 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                        )}>
-                            <span className={clsx(
-                                'w-2 h-2 rounded-full ring-2',
-                                connectionStatus === 'live' && 'bg-emerald-400 ring-emerald-900',
-                                connectionStatus === 'connecting' && 'bg-amber-400 ring-amber-900',
-                                connectionStatus === 'offline' && 'bg-rose-400 ring-rose-900'
-                            )} />
-                            <span className="capitalize">{connectionStatus === 'live' ? 'Live' : connectionStatus}</span>
-                        </div>
-                        {connectionStatus === 'live' && (
-                            <button
-                                onClick={handleDisconnect}
-                                className="p-1 px-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-md border border-slate-800 transition-colors"
-                                title="Disconnect Session"
-                            >
-                                <LogOut className="w-4 h-4" />
-                            </button>
-                        )}
-                    </div>
-                )}
-            </header>
+    const handleFlipCamera = () => {
+        if (videoDevices.length < 2) return;
+        const currentIdx = videoDevices.findIndex(d => d.deviceId === selectedDeviceId);
+        const nextIdx = (currentIdx + 1) % videoDevices.length;
+        setSelectedDeviceId(videoDevices[nextIdx].deviceId);
+        setIsFlashOn(false);
+    };
+
+    return (
+        <div className="relative flex flex-col min-h-screen max-h-screen overflow-hidden bg-slate-950 text-slate-100 app-bg">
+            {/* Ambient background glows */}
+            <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+                <div className="absolute -top-28 -right-28 w-[26rem] h-[26rem] rounded-full bg-emerald-500/10 blur-3xl animate-glow-pulse" />
+                <div className="absolute -bottom-36 -left-28 w-[30rem] h-[30rem] rounded-full bg-blue-600/10 blur-3xl animate-glow-pulse [animation-delay:1.5s]" />
+            </div>
 
             {/* Main Content Area */}
-            <main className="flex-1 flex flex-col overflow-y-auto custom-scrollbar relative">
-
+            <main className="relative z-10 flex-1 flex flex-col overflow-y-auto custom-scrollbar">
 
                 {!isSessionSet ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-6 select-none">
-                        <div className="w-full max-w-sm p-6 rounded-2xl glass-panel space-y-6 shadow-2xl relative overflow-hidden">
-                            <div className="absolute -top-10 -right-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl" />
-                            <div className="absolute -bottom-10 -left-10 w-24 h-24 bg-blue-500/10 rounded-full blur-xl" />
+                        <div className="w-full max-w-sm p-6 sm:p-7 rounded-3xl glass-panel space-y-6 shadow-2xl relative overflow-hidden animate-fade-up">
+                            <div className="absolute -top-10 -right-10 w-24 h-24 bg-emerald-500/10 rounded-full blur-2xl" />
+                            <div className="absolute -bottom-10 -left-10 w-24 h-24 bg-blue-500/10 rounded-full blur-2xl" />
 
-                            <div className="text-center space-y-2 relative">
-                                {/* Scan QR Code Switch button */}
-                                <button
-                                    onClick={() => {
-                                        setQrError('');
-                                        setIsQrScannerActive(prev => !prev);
-                                    }}
-                                    className="absolute -top-2 -right-2 p-2 hover:bg-slate-800/80 border border-slate-700 bg-slate-800/40 rounded-xl text-slate-400 hover:text-emerald-400 transition shadow-sm z-20"
-                                    title={isQrScannerActive ? "Enter session code manually" : "Scan terminal QR Code"}
-                                    type="button"
-                                >
-                                    {isQrScannerActive ? <X className="w-5 h-5" /> : <QrCode className="w-5 h-5" />}
-                                </button>
+                            {/* Scan QR Code Switch button */}
+                            <button
+                                onClick={() => {
+                                    setQrError('');
+                                    setIsQrScannerActive(prev => !prev);
+                                }}
+                                className="absolute top-3 right-3 p-2 hover:bg-white/5 border border-white/10 bg-white/5 rounded-xl text-slate-400 hover:text-emerald-400 transition shadow-sm z-20 group"
+                                title={isQrScannerActive ? "Enter session code manually" : "Scan terminal QR Code"}
+                                type="button"
+                            >
+                                {isQrScannerActive ? <X className="w-5 h-5" /> : <QrCode className="w-5 h-5 text-emerald-400 animate-glow-pulse" />}
+                            </button>
 
-                                <div className="w-14 h-14 bg-slate-800/80 rounded-2xl flex items-center justify-center mx-auto border border-slate-700 shadow-md">
-                                    {isQrScannerActive ? (
-                                        <QrCode className="w-6 h-6 text-emerald-400 animate-pulse" />
-                                    ) : (
-                                        <Camera className="w-6 h-6 text-emerald-400" />
-                                    )}
+                            <div className="text-center space-y-3 relative">
+                                <div className="relative mx-auto w-fit">
+                                    <div className="absolute -inset-3 rounded-full bg-emerald-500/15 blur-2xl" />
+                                    <img
+                                        src="/applogo.png"
+                                        alt="POS Scanner"
+                                        className="relative w-16 h-16 rounded-2xl object-cover ring-1 ring-emerald-500/30 shadow-xl shadow-emerald-950/40"
+                                    />
                                 </div>
-                                <h2 className="text-lg font-bold text-white tracking-tight">Connect to Sales Desk</h2>
-                                <p className="text-xs text-slate-400 max-w-[280px] mx-auto">
-                                    {isQrScannerActive
-                                        ? "Point your camera at the POS checkout QR code to link instantly."
-                                        : "Enter the 5-character session code shown on your POS checkout screen."}
-                                </p>
+                                <div>
+                                    <h2 className="text-lg font-bold text-white tracking-tight">
+                                        Connect to Sales Desk
+                                    </h2>
+                                    <p className="text-xs text-slate-400 max-w-[280px] mx-auto mt-1 leading-relaxed">
+                                        {isQrScannerActive
+                                            ? "Point your camera at the POS checkout QR code to link instantly."
+                                            : "Enter the 5-character session code shown on your POS checkout screen."}
+                                    </p>
+                                </div>
                             </div>
 
                             {isQrScannerActive ? (
                                 <div className="space-y-4 relative">
-                                    <div className="relative aspect-square w-full rounded-xl overflow-hidden border border-slate-800 bg-black shadow-inner">
+                                    <div className="relative aspect-square w-full rounded-2xl overflow-hidden border border-white/10 bg-black shadow-inner">
                                         {qrError ? (
                                             <div className="absolute inset-0 flex flex-col items-center justify-center p-4 text-center select-none text-slate-400">
                                                 <AlertCircle className="w-8 h-8 text-rose-500 mb-2" />
@@ -530,7 +545,7 @@ export default function MobileScannerApp() {
                                                         setIsQrScannerActive(false);
                                                         setTimeout(() => setIsQrScannerActive(true), 50);
                                                     }}
-                                                    className="mt-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 py-1.5 px-3 rounded-lg text-[10px] font-semibold transition"
+                                                    className="mt-3 bg-white/10 hover:bg-white/15 text-slate-200 border border-white/15 py-1.5 px-3 rounded-lg text-[10px] font-semibold transition"
                                                 >
                                                     Retry Camera
                                                 </button>
@@ -545,7 +560,7 @@ export default function MobileScannerApp() {
                                                 />
                                                 {/* Viewfinder scanner center target indicator */}
                                                 <div className="absolute inset-0 flex items-center justify-center bg-transparent pointer-events-none">
-                                                    <div className="w-2/3 h-2/3 border-2 border-emerald-500/20 rounded-xl relative">
+                                                    <div className="w-2/3 h-2/3 border border-emerald-500/30 rounded-xl relative">
                                                         <div className="absolute -top-[2px] -left-[2px] w-4 h-4 border-t-2 border-l-2 border-emerald-400 rounded-tl" />
                                                         <div className="absolute -top-[2px] -right-[2px] w-4 h-4 border-t-2 border-r-2 border-emerald-400 rounded-tr" />
                                                         <div className="absolute -bottom-[2px] -left-[2px] w-4 h-4 border-b-2 border-l-2 border-emerald-400 rounded-bl" />
@@ -553,14 +568,14 @@ export default function MobileScannerApp() {
                                                     </div>
                                                 </div>
                                                 {/* Animated Laser Scanning Line */}
-                                                <div className="absolute w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse top-1/2 -translate-y-1/2" />
+                                                <div className="absolute w-full h-[2px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_8px_rgba(16,185,129,0.7)] animate-pulse top-1/2 -translate-y-1/2" />
                                             </>
                                         )}
                                     </div>
                                     <button
                                         type="button"
                                         onClick={() => setIsQrScannerActive(false)}
-                                        className="w-full py-3 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-800 rounded-xl text-xs font-semibold transition"
+                                        className="w-full py-3 bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 rounded-xl text-xs font-semibold transition"
                                     >
                                         Cancel Scanning
                                     </button>
@@ -568,7 +583,7 @@ export default function MobileScannerApp() {
                             ) : (
                                 <form onSubmit={handleSessionIdSubmit} className="space-y-4 relative">
                                     <div>
-                                        <label htmlFor="sessionId" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-1.5 px-0.5">
+                                        <label htmlFor="sessionId" className="block text-[11px] font-semibold text-slate-400 uppercase tracking-widest mb-2 px-0.5">
                                             Terminal Session Code
                                         </label>
                                         <input
@@ -578,8 +593,8 @@ export default function MobileScannerApp() {
                                             maxLength={10}
                                             value={sessionId}
                                             onChange={(e) => setSessionId(e.target.value.toUpperCase())}
-                                            placeholder="e.g. S-9A2"
-                                            className="w-full bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 rounded-xl px-4 py-3.5 text-center font-mono text-xl font-bold tracking-wider text-white uppercase placeholder-slate-600 transition-all shadow-inner"
+                                            placeholder="S-9A2"
+                                            className="w-full bg-slate-950/80 border border-white/10 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 rounded-2xl px-4 py-4 text-center font-mono text-2xl font-bold tracking-[0.3em] text-white uppercase placeholder-slate-600 transition-all shadow-inner"
                                             autoComplete="off"
                                             autoFocus
                                         />
@@ -589,47 +604,148 @@ export default function MobileScannerApp() {
                                         type="submit"
                                         disabled={!sessionId.trim()}
                                         className={clsx(
-                                            'w-full py-3.5 rounded-xl font-semibold text-sm transition-all focus:outline-none flex items-center justify-center gap-2 active:scale-[0.98]',
+                                            'group w-full py-4 rounded-2xl font-bold text-sm transition-all focus:outline-none flex items-center justify-center gap-2 active:scale-[0.98]',
                                             sessionId.trim()
-                                                ? 'bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 shadow-lg shadow-emerald-950/40 text-black'
-                                                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+                                                ? 'bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 hover:brightness-110 hover:shadow-lg hover:shadow-emerald-500/25 shadow-lg shadow-emerald-950/40'
+                                                : 'bg-white/5 text-slate-600 cursor-not-allowed border border-white/10'
                                         )}
                                     >
-                                        <Link className="w-4 h-4" />
+                                        <Link className="w-4 h-4 transition-transform group-hover:rotate-12" />
                                         Establish Link
                                     </button>
                                 </form>
                             )}
                         </div>
 
-                        {/* Quick Helper Tips */}
-                        <div className="mt-8 max-w-xs text-center space-y-2 text-[11px] text-slate-500">
-                            <p>💡 Tip: You can scan codes instantly by opening the POS site scanner link containing <code className="bg-slate-800/80 px-1.5 py-0.5 rounded text-slate-400">?session=CODE</code></p>
+                        {/* How to use steps */}
+                        <div className="w-full max-w-sm mt-8 space-y-4 animate-fade-up" style={{ animationDelay: '150ms' }}>
+                            <div className="flex items-center gap-2 px-1">
+                                <span className="w-6 h-6 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 flex items-center justify-center">
+                                    <ScanLine className="w-3.5 h-3.5" />
+                                </span>
+                                <h3 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                                    How to use
+                                </h3>
+                            </div>
+
+                            <div className="relative rounded-2xl glass-card p-5">
+                                {/* Vertical connector line */}
+                                <div className="absolute left-[26px] top-8 bottom-8 w-px bg-gradient-to-b from-emerald-500/40 via-white/10 to-white/5" />
+
+                                <ol className="space-y-5 relative">
+                                    <li className="flex gap-3.5">
+                                        <div className="relative flex-none w-[52px] flex flex-col items-center">
+                                            <span className="w-[52px] h-[52px] rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                                                <Store className="w-5 h-5" />
+                                            </span>
+                                        </div>
+                                        <div className="pt-0.5">
+                                            <p className="text-sm font-semibold text-white">Open your POS terminal</p>
+                                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                                Start a checkout on the sales desk and note the session code shown on screen (e.g. <code className="font-mono text-emerald-400 bg-white/5 px-1 py-0.5 rounded">S-9A2</code>).
+                                            </p>
+                                        </div>
+                                    </li>
+
+                                    <li className="flex gap-3.5">
+                                        <div className="relative flex-none w-[52px] flex flex-col items-center">
+                                            <span className="w-[52px] h-[52px] rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                                                <KeyRound className="w-5 h-5" />
+                                            </span>
+                                        </div>
+                                        <div className="pt-0.5">
+                                            <p className="text-sm font-semibold text-white">Link this phone</p>
+                                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                                Tap the QR icon above to scan the terminal's QR code, or enter the session code manually and press <span className="text-emerald-400 font-semibold">Establish Link</span>.
+                                            </p>
+                                        </div>
+                                    </li>
+
+                                    <li className="flex gap-3.5">
+                                        <div className="relative flex-none w-[52px] flex flex-col items-center">
+                                            <span className="w-[52px] h-[52px] rounded-2xl bg-gradient-to-br from-emerald-500/20 to-teal-500/10 border border-emerald-500/25 flex items-center justify-center text-emerald-400">
+                                                <ScanBarcode className="w-5 h-5" />
+                                            </span>
+                                        </div>
+                                        <div className="pt-0.5">
+                                            <p className="text-sm font-semibold text-white">Scan & checkout</p>
+                                            <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                                                Point your camera at any product barcode. Each scan is sent to your POS instantly over a secure WebRTC link.
+                                            </p>
+                                        </div>
+                                    </li>
+                                </ol>
+                            </div>
+
+                            <div className="flex items-center justify-center gap-1.5 text-[10px] text-slate-500 select-none">
+                                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500/70" />
+                                <span>Direct peer-to-peer • No data leaves your store network</span>
+                            </div>
                         </div>
+
                     </div>
                 ) : (
 
                     /* State B: Scanner Viewport & Logs */
                     <div className="flex-1 flex flex-col p-4 gap-4 overflow-hidden">
 
+                        {/* Mobile status bar */}
+                        <div className="flex items-center justify-between flex-none select-none animate-fade-in">
+                            <div className="flex items-center gap-2">
+                                <img
+                                    src="/applogo.png"
+                                    alt=""
+                                    className="w-8 h-8 rounded-lg object-cover ring-1 ring-emerald-500/25"
+                                />
+                                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold border backdrop-blur-sm bg-slate-950/50
+                                    text-slate-300 border-white/10">
+                                    <span className={clsx(
+                                        'w-1.5 h-1.5 rounded-full ring-2',
+                                        connectionStatus === 'live' && 'bg-emerald-400 ring-emerald-500/20',
+                                        connectionStatus === 'connecting' && 'bg-amber-400 ring-amber-500/20 animate-pulse',
+                                        connectionStatus === 'offline' && 'bg-rose-400 ring-rose-500/20'
+                                    )} />
+                                    <span className="font-mono tracking-wide">POS-{sessionId}</span>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                                {connectionStatus !== 'live' && (
+                                    <button
+                                        onClick={handleReconnect}
+                                        className="p-2 text-slate-400 hover:text-emerald-400 bg-white/5 border border-white/10 rounded-xl transition-colors"
+                                        title="Retry Connection"
+                                    >
+                                        <RotateCw className="w-4 h-4" />
+                                    </button>
+                                )}
+                                <button
+                                    onClick={handleDisconnect}
+                                    className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 bg-white/5 border border-white/10 rounded-xl transition-colors"
+                                    title="Disconnect Session"
+                                >
+                                    <LogOut className="w-4 h-4" />
+                                </button>
+                            </div>
+                        </div>
+
                         {/* Connection Banner Layer if not live */}
                         {connectionStatus !== 'live' && (
-                            <div className="p-4 rounded-xl border flex flex-col gap-3 shadow-lg select-none glass-card border-slate-800">
+                            <div className="p-4 rounded-2xl border border-white/5 flex flex-col gap-3 shadow-lg select-none glass-card animate-fade-in">
                                 <div className="flex items-start gap-3">
                                     {connectionStatus === 'connecting' ? (
-                                        <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                                        <div className="p-2.5 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
                                             <div className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
                                         </div>
                                     ) : (
-                                        <div className="p-2 rounded-lg bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                                            <WifiOff className="w-5 h-5 animate-bounce" />
+                                        <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                                            <WifiOff className="w-5 h-5" />
                                         </div>
                                     )}
                                     <div className="flex-1 min-w-0">
                                         <h3 className="text-sm font-semibold text-white">
                                             {connectionStatus === 'connecting' ? 'Linking to POS console...' : 'Disconnected'}
                                         </h3>
-                                        <p className="text-xs text-slate-400 mt-0.5">
+                                        <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
                                             {connectionStatus === 'connecting'
                                                 ? `Awaiting terminal link matching ID 'POS-${sessionId}'...`
                                                 : errorMessage || 'Real-time WebRTC DataChannel connection was interrupted.'}
@@ -641,14 +757,14 @@ export default function MobileScannerApp() {
                                 <div className="flex gap-2">
                                     <button
                                         onClick={handleReconnect}
-                                        className="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 py-2 px-3 rounded-lg text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
+                                        className="flex-1 bg-white/10 hover:bg-white/15 text-slate-200 border border-white/10 py-2.5 px-3 rounded-xl text-xs font-semibold transition-colors flex items-center justify-center gap-1.5"
                                     >
                                         <RotateCw className="w-3.5 h-3.5" />
                                         Retry Connection
                                     </button>
                                     <button
                                         onClick={handleDisconnect}
-                                        className="bg-transparent hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-slate-800 py-2 px-3 rounded-lg text-xs transition-colors"
+                                        className="bg-transparent hover:bg-rose-500/10 text-slate-400 hover:text-rose-400 border border-white/10 py-2.5 px-3 rounded-xl text-xs transition-colors"
                                     >
                                         Change Code
                                     </button>
@@ -656,8 +772,19 @@ export default function MobileScannerApp() {
                             </div>
                         )}
 
+                        {/* Live session banner when connected */}
+                        {connectionStatus === 'live' && (
+                            <div className="flex items-center justify-center gap-2 animate-fade-in select-none">
+                                <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500/10 border border-emerald-500/25 text-emerald-400 text-[11px] font-semibold">
+                                    <Wifi className="w-3.5 h-3.5" />
+                                    <span>Streaming to <strong className="font-mono">POS-{sessionId}</strong></span>
+                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                </div>
+                            </div>
+                        )}
+
                         {/* Video Viewfinder Section */}
-                        <div className="relative flex-none aspect-[4/3] w-full max-w-md mx-auto rounded-3xl overflow-hidden glass-panel border border-slate-800 shadow-2xl bg-black">
+                        <div className="relative flex-none aspect-[4/3] w-full max-w-md mx-auto rounded-3xl overflow-hidden glass-panel border border-white/10 shadow-2xl bg-black">
                             {isCameraActive && !cameraError ? (
                                 <>
                                     <video
@@ -667,55 +794,63 @@ export default function MobileScannerApp() {
                                         muted
                                     />
 
-                                    {/* Viewfinder Bounding Box Laser Overlay overlay */}
+                                    {/* Viewfinder Bounding Box Laser Overlay */}
                                     <div className="absolute inset-0 flex items-center justify-center bg-transparent pointer-events-none">
-                                        <div className="relative w-3/4 h-2/3 border-2 border-emerald-500/30 rounded-2xl flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.05)]">
+                                        <div className="relative w-3/4 h-2/3 border border-emerald-500/25 rounded-2xl flex items-center justify-center shadow-[0_0_40px_rgba(16,185,129,0.06)]">
                                             {/* Bounding Box corners indicator */}
-                                            <div className="absolute -top-[2px] -left-[2px] w-6 h-6 border-t-4 border-l-4 border-emerald-500 rounded-tl-lg" />
-                                            <div className="absolute -top-[2px] -right-[2px] w-6 h-6 border-t-4 border-r-4 border-emerald-500 rounded-tr-lg" />
-                                            <div className="absolute -bottom-[2px] -left-[2px] w-6 h-6 border-b-4 border-l-4 border-emerald-500 rounded-bl-lg" />
-                                            <div className="absolute -bottom-[2px] -right-[2px] w-6 h-6 border-b-4 border-r-4 border-emerald-500 rounded-br-lg" />
+                                            <div className="absolute -top-[2px] -left-[2px] w-6 h-6 border-t-[3px] border-l-[3px] border-emerald-500 rounded-tl-lg" />
+                                            <div className="absolute -top-[2px] -right-[2px] w-6 h-6 border-t-[3px] border-r-[3px] border-emerald-500 rounded-tr-lg" />
+                                            <div className="absolute -bottom-[2px] -left-[2px] w-6 h-6 border-b-[3px] border-l-[3px] border-emerald-500 rounded-bl-lg" />
+                                            <div className="absolute -bottom-[2px] -right-[2px] w-6 h-6 border-b-[3px] border-r-[3px] border-emerald-500 rounded-br-lg" />
 
                                             {/* Animated Laser Scanning Line */}
                                             <div className="absolute w-full h-[3px] bg-gradient-to-r from-transparent via-emerald-400 to-transparent shadow-[0_0_12px_rgba(16,185,129,0.8)] animate-scanner-laser" />
                                         </div>
                                     </div>
 
+                                    {/* Flash indicator */}
+                                    {isFlashOn && (
+                                        <div className="absolute top-3 right-3 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 border border-amber-500/30 text-amber-400 text-[10px] font-semibold backdrop-blur-sm pointer-events-none select-none">
+                                            <Zap className="w-3 h-3 fill-current" />
+                                            Torch
+                                        </div>
+                                    )}
+
                                     {/* Visual Scan Confirmation Toast Alert */}
                                     {cooldown && lastScanned && (
                                         <div className="absolute inset-x-4 bottom-4 flex justify-center pointer-events-none animate-bounce">
-                                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-500 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-950/60 border border-emerald-400">
+                                            <div className="flex items-center gap-2 px-3.5 py-2 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 text-xs font-bold shadow-lg shadow-emerald-950/60 border border-emerald-400/50">
                                                 <Check className="w-3.5 h-3.5 stroke-[3px]" />
-                                                <span>Sent: <strong className="font-mono">{lastScanned}</strong></span>
+                                                <span>Sent: <strong className="font-mono tracking-wide">{lastScanned}</strong></span>
                                             </div>
                                         </div>
                                     )}
 
                                     {/* Active Link Session Code Watermark */}
-                                    <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-950/80 backdrop-blur-sm border border-slate-800 text-[10px] text-slate-400 font-mono pointer-events-none select-none">
+                                    <div className="absolute top-3 left-3 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/70 backdrop-blur-md border border-white/10 text-[10px] text-slate-300 font-mono pointer-events-none select-none">
                                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                                         <span>POS ID: {sessionId}</span>
                                     </div>
                                 </>
                             ) : (
                                 <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none text-slate-400 space-y-4">
-                                    <div className="w-12 h-12 bg-slate-900 border border-slate-800 rounded-xl flex items-center justify-center text-slate-500">
+                                    <div className="w-12 h-12 bg-slate-900/80 border border-white/10 rounded-xl flex items-center justify-center text-slate-500">
                                         <WifiOff className="w-6 h-6" />
                                     </div>
                                     <div className="space-y-1">
                                         <p className="font-semibold text-white text-sm">
                                             {cameraError ? 'Camera Access Pending' : 'Camera is Disabled'}
                                         </p>
-                                        <p className="text-xs text-slate-550 max-w-[220px]">
+                                        <p className="text-xs text-slate-500 max-w-[220px] leading-relaxed">
                                             {cameraError || 'Activate the camera via the start toggle below to start barcode capture.'}
                                         </p>
                                     </div>
                                     {(!isCameraActive || cameraError) && (
                                         <button
                                             onClick={cameraError ? handleRetryCamera : () => setIsCameraActive(true)}
-                                            className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-semibold py-2 px-4 rounded-lg text-xs flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-950/30 font-bold"
+                                            className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:brightness-110 text-slate-950 font-bold py-2.5 px-5 rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-lg shadow-emerald-950/30"
                                         >
-                                            <Play className="w-3.5 h-3.5 fill-current text-slate-950" />
+                                            <Play className="w-3.5 h-3.5 fill-current" />
                                             {cameraError ? 'Allow/Retry Camera' : 'Start Camera Feed'}
                                         </button>
                                     )}
@@ -725,13 +860,13 @@ export default function MobileScannerApp() {
 
                         {/* Viewfinder Controls & Camera Selector */}
                         {isCameraActive && !cameraError && (
-                            <div className="w-full max-w-md mx-auto grid grid-cols-12 gap-2 text-xs">
+                            <div className="w-full max-w-md mx-auto flex gap-2 text-xs">
                                 {/* Camera dropdown selector */}
-                                <div className="col-span-9 relative">
+                                <div className="flex-1 relative">
                                     <select
                                         value={selectedDeviceId}
                                         onChange={(e) => setSelectedDeviceId(e.target.value)}
-                                        className="w-full bg-slate-950 text-slate-300 border border-slate-800 rounded-xl py-3 px-3 pl-8 appearance-none focus:outline-none focus:ring-1 focus:ring-slate-700 transition"
+                                        className="w-full bg-slate-950/80 text-slate-300 border border-white/10 rounded-2xl py-3 px-3 pl-9 appearance-none focus:outline-none focus:ring-1 focus:ring-emerald-500/40 transition"
                                     >
                                         {videoDevices.map((d, index) => (
                                             <option key={d.deviceId} value={d.deviceId}>
@@ -744,10 +879,37 @@ export default function MobileScannerApp() {
                                     </div>
                                 </div>
 
+                                {/* Camera flip button */}
+                                {videoDevices.length > 1 && (
+                                    <button
+                                        onClick={handleFlipCamera}
+                                        className="bg-slate-950/80 hover:bg-white/10 border border-white/10 text-slate-300 hover:text-emerald-400 px-3.5 py-3 rounded-2xl transition flex items-center justify-center"
+                                        title="Switch Camera"
+                                    >
+                                        <SwitchCamera className="w-4 h-4" />
+                                    </button>
+                                )}
+
+                                {/* Flash / Torch toggle */}
+                                {isTorchSupported && (
+                                    <button
+                                        onClick={toggleFlash}
+                                        className={clsx(
+                                            'border px-3.5 py-3 rounded-2xl transition flex items-center justify-center',
+                                            isFlashOn
+                                                ? 'bg-amber-500/20 border-amber-500/40 text-amber-400'
+                                                : 'bg-slate-950/80 hover:bg-white/10 border-white/10 text-slate-300 hover:text-amber-400'
+                                        )}
+                                        title="Toggle Flash"
+                                    >
+                                        <Zap className={clsx('w-4 h-4', isFlashOn && 'fill-current')} />
+                                    </button>
+                                )}
+
                                 {/* Stop feed toggle */}
                                 <button
                                     onClick={() => setIsCameraActive(false)}
-                                    className="col-span-3 bg-slate-950 hover:bg-rose-500/15 border border-slate-800 hover:border-rose-500/30 text-slate-400 hover:text-rose-400 py-3 rounded-xl transition flex items-center justify-center gap-1.5"
+                                    className="bg-slate-950/80 hover:bg-rose-500/15 border border-white/10 hover:border-rose-500/30 text-slate-400 hover:text-rose-400 px-3.5 py-3 rounded-2xl transition flex items-center justify-center"
                                     title="Pause Camera"
                                 >
                                     <Square className="w-3.5 h-3.5 fill-current" />
@@ -756,13 +918,18 @@ export default function MobileScannerApp() {
                         )}
 
                         {/* Local Session Scan History Feed */}
-                        <div className="flex-1 flex flex-col min-h-0 bg-slate-950/50 rounded-2xl border border-slate-850 p-4 relative">
-                            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-3 select-none flex-none">
-                                <div className="flex items-center gap-1.5">
-                                    <History className="w-4 h-4 text-emerald-400" />
-                                    <h3 className="font-semibold text-xs tracking-wide text-white uppercase">History Feed</h3>
+                        <div className="flex-1 flex flex-col min-h-0 bg-slate-950/40 rounded-3xl border border-white/5 p-4 relative">
+                            <div className="flex items-center justify-between border-b border-white/5 pb-3 mb-3 select-none flex-none">
+                                <div className="flex items-center gap-2">
+                                    <div className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                                        <History className="w-3.5 h-3.5" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold text-xs tracking-wide text-white uppercase">History Feed</h3>
+                                        <p className="text-[9px] text-slate-500">Latest scans piped to terminal</p>
+                                    </div>
                                 </div>
-                                <div className="px-2 py-0.5 rounded bg-slate-800 text-[10px] text-slate-400 font-mono">
+                                <div className="px-2.5 py-1 rounded-full bg-white/5 border border-white/10 text-[10px] text-slate-400 font-mono">
                                     {scanHistory.length} items
                                 </div>
                             </div>
@@ -770,22 +937,24 @@ export default function MobileScannerApp() {
                             {/* Items scroll list */}
                             <div className="flex-grow overflow-y-auto custom-scrollbar space-y-2">
                                 {scanHistory.length > 0 ? (
-                                    scanHistory.map((item) => (
+                                    scanHistory.map((item, index) => (
                                         <div
                                             key={item.id}
-                                            className="flex items-center justify-between p-3 rounded-xl bg-slate-900 border border-slate-800 hover:border-slate-700 transition"
+                                            className="flex items-center justify-between p-3 rounded-2xl bg-slate-900/60 border border-white/5 hover:border-emerald-500/20 transition animate-fade-in"
+                                            style={{ animationDelay: `${index * 40}ms` }}
                                         >
                                             <div className="min-w-0 pr-2">
                                                 <p className="font-mono text-sm font-bold text-white tracking-wider truncate">
                                                     {item.barcode}
                                                 </p>
-                                                <p className="text-[10px] text-slate-500 mt-0.5">
+                                                <p className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
+                                                    <span className="w-1 h-1 rounded-full bg-slate-600" />
                                                     Scanned at {item.timestamp}
                                                 </p>
                                             </div>
 
                                             {/* Sync Receipt Indicators */}
-                                            <div className="flex items-center gap-1">
+                                            <div className="flex items-center gap-1 flex-none">
                                                 {item.status === 'sent' && (
                                                     <div className="flex items-center gap-1 bg-emerald-500/10 text-emerald-400 py-1 px-2 rounded-lg border border-emerald-500/20 text-[10px] uppercase font-bold tracking-wider select-none">
                                                         <CheckCheck className="w-3.5 h-3.5 stroke-[2.5]" />
@@ -808,13 +977,16 @@ export default function MobileScannerApp() {
                                         </div>
                                     ))
                                 ) : (
-                                    <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none text-slate-500 space-y-2">
-                                        <div className="w-10 h-10 bg-slate-900/60 rounded-xl flex items-center justify-center text-slate-600 border border-slate-800">
-                                            <History className="w-5 h-5" />
+                                    <div className="h-full flex flex-col items-center justify-center p-6 text-center select-none text-slate-500 space-y-3">
+                                        <div className="relative">
+                                            <div className="w-14 h-14 bg-slate-900/60 rounded-2xl flex items-center justify-center text-slate-600 border border-white/5">
+                                                <ScanLine className="w-6 h-6" />
+                                            </div>
+                                            <span className="absolute -inset-1 rounded-2xl bg-emerald-500/5 blur-lg" />
                                         </div>
-                                        <div className="space-y-0.5">
+                                        <div className="space-y-1">
                                             <p className="text-xs font-semibold text-slate-400">Scanner Ready</p>
-                                            <p className="text-[10px] text-slate-650 max-w-[190px]">
+                                            <p className="text-[10px] text-slate-600 max-w-[200px] leading-relaxed">
                                                 Scanned barcodes will be logged here and piped immediately to your POS terminal.
                                             </p>
                                         </div>
@@ -828,8 +1000,13 @@ export default function MobileScannerApp() {
             </main>
 
             {/* Footer Info Details */}
-            <footer className="text-center py-3 select-none text-[10px] border-t border-slate-800 bg-slate-950/50 text-slate-500 font-mono tracking-wider flex-none">
-                POS SCANNER PWA © 2026 • RTC DATA CAPTURE
+            <footer className="relative z-10 text-center py-2.5 select-none text-[10px] border-t border-white/5 bg-slate-950/50 text-slate-600 font-mono tracking-widest flex-none flex items-center justify-center gap-2">
+                <span>POS SCANNER PWA © 2026</span>
+                <span className="w-1 h-1 rounded-full bg-slate-700" />
+                <span className="flex items-center gap-1 text-slate-500">
+                    <RefreshCw className="w-3 h-3" />
+                    RTC DATA CAPTURE
+                </span>
             </footer>
         </div>
     );

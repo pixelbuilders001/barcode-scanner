@@ -3,6 +3,7 @@ const ASSETS = [
     '/',
     '/index.html',
     '/manifest.json',
+    '/applogo.png',
     '/icon-192.png',
     '/icon-512.png'
 ];
