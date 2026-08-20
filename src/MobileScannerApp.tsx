@@ -22,7 +22,9 @@ import {
     ShieldCheck,
     Store,
     KeyRound,
-    ScanBarcode
+    ScanBarcode,
+    Download,
+    Share
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -42,6 +44,11 @@ export default function MobileScannerApp() {
     const [errorMessage, setErrorMessage] = useState<string>('');
     const [isQrScannerActive, setIsQrScannerActive] = useState<boolean>(false);
     const [qrError, setQrError] = useState<string>('');
+
+    // PWA Install State
+    const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+    const [isAppInstalled, setIsAppInstalled] = useState<boolean>(false);
+    const [showIosPrompt, setShowIosPrompt] = useState<boolean>(false);
 
     // Scans History
     const [scanHistory, setScanHistory] = useState<ScanItem[]>([]);
@@ -96,6 +103,55 @@ export default function MobileScannerApp() {
         };
         checkPermission();
     }, []);
+
+    // Detect if PWA is already installed or listen for beforeinstallprompt
+    useEffect(() => {
+        const checkIsInstalled = () => {
+            const isStandalone =
+                window.matchMedia('(display-mode: standalone)').matches ||
+                (window.navigator as any).standalone === true ||
+                document.referrer.includes('android-app://');
+            setIsAppInstalled(isStandalone);
+        };
+
+        checkIsInstalled();
+
+        const handleBeforeInstallPrompt = (e: Event) => {
+            e.preventDefault();
+            setDeferredPrompt(e);
+        };
+
+        const handleAppInstalled = () => {
+            setIsAppInstalled(true);
+            setDeferredPrompt(null);
+        };
+
+        window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+        window.addEventListener('appinstalled', handleAppInstalled);
+
+        return () => {
+            window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+            window.removeEventListener('appinstalled', handleAppInstalled);
+        };
+    }, []);
+
+    const handleInstallPwa = async () => {
+        if (deferredPrompt) {
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            if (outcome === 'accepted') {
+                setIsAppInstalled(true);
+            }
+            setDeferredPrompt(null);
+        } else {
+            const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+            if (isIos) {
+                setShowIosPrompt(true);
+            } else {
+                alert('To install app: tap browser menu (3 dots) and select "Install App" or "Add to Home screen".');
+            }
+        }
+    };
 
     const grantCameraAccess = async () => {
         setCameraError('');
@@ -742,6 +798,20 @@ export default function MobileScannerApp() {
                             )}
                         </div>
 
+                        {/* Download PWA CTA button if not installed */}
+                        {!isAppInstalled && (
+                            <div className="w-full max-w-sm mt-4 animate-fade-up">
+                                <button
+                                    type="button"
+                                    onClick={handleInstallPwa}
+                                    className="w-full py-3.5 px-4 rounded-2xl bg-gradient-to-r from-emerald-500/20 via-teal-500/15 to-emerald-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center justify-center gap-2.5 transition-all shadow-lg shadow-emerald-950/30 active:scale-[0.98]"
+                                >
+                                    <Download className="w-4 h-4 text-emerald-400 animate-bounce" />
+                                    <span>Download App on Phone</span>
+                                </button>
+                            </div>
+                        )}
+
                         {/* How to use steps */}
                         <div className="w-full max-w-sm mt-8 space-y-4 animate-fade-up" style={{ animationDelay: '150ms' }}>
                             <div className="flex items-center gap-2 px-1">
@@ -1123,6 +1193,33 @@ export default function MobileScannerApp() {
                     </div>
                 )}
             </main>
+
+            {/* iOS PWA Installation Guide Modal */}
+            {showIosPrompt && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+                    <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 max-w-xs text-center space-y-4 shadow-2xl relative">
+                        <button
+                            onClick={() => setShowIosPrompt(false)}
+                            className="absolute top-3 right-3 p-2 text-slate-400 hover:text-white"
+                        >
+                            <X className="w-4 h-4" />
+                        </button>
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 mx-auto">
+                            <Share className="w-6 h-6" />
+                        </div>
+                        <h3 className="text-sm font-bold text-white">Install on iPhone</h3>
+                        <p className="text-xs text-slate-300 leading-relaxed">
+                            Tap the <span className="font-semibold text-emerald-400">Share button</span> in Safari, then tap <span className="font-semibold text-emerald-400">"Add to Home Screen"</span>.
+                        </p>
+                        <button
+                            onClick={() => setShowIosPrompt(false)}
+                            className="w-full py-2.5 bg-emerald-500 text-slate-950 rounded-xl text-xs font-bold"
+                        >
+                            Got it
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Footer Info Details */}
             <footer className="relative z-10 text-center py-2.5 select-none text-[11px] border-t border-white/5 bg-slate-950/80 text-slate-400 flex-none flex items-center justify-center gap-1.5 font-medium">
