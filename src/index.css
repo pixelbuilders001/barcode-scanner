@@ -1,30 +1,41 @@
 @import "tailwindcss";
 
 @theme {
-  --color-slate-900: #0f172a;
-  --color-slate-950: #020617;
-  --animate-scanner-laser: laser 2s linear infinite;
-  --animate-fade-up: fade-up 0.45s ease both;
-  --animate-fade-in: fade-in 0.35s ease both;
-  --animate-glow-pulse: glow-pulse 3s ease-in-out infinite;
+  --color-slate-900: #0b0f19;
+  --color-slate-950: #05070d;
+  --animate-scanner-laser: laser 2.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  --animate-fade-up: fade-up 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade-in: fade-in 0.25s ease both;
+  --animate-scale-in: scale-in 0.25s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-glow-pulse: glow-pulse 4s ease-in-out infinite;
+  --animate-reticle-pulse: reticle-pulse 2s ease-in-out infinite;
 
   @keyframes laser {
-    0%,
-    100% {
-      top: 12%;
+    0% {
+      top: 6%;
+      opacity: 0.3;
     }
-
+    15% {
+      opacity: 1;
+    }
     50% {
-      top: 88%;
+      top: 94%;
+      opacity: 1;
+    }
+    65% {
+      opacity: 0.3;
+    }
+    100% {
+      top: 6%;
+      opacity: 0.3;
     }
   }
 
   @keyframes fade-up {
     from {
       opacity: 0;
-      transform: translateY(14px);
+      transform: translateY(12px);
     }
-
     to {
       opacity: 1;
       transform: translateY(0);
@@ -35,79 +46,121 @@
     from {
       opacity: 0;
     }
-
     to {
       opacity: 1;
     }
   }
 
-  @keyframes glow-pulse {
-    0%,
-    100% {
-      opacity: 0.55;
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.95);
+    }
+    to {
+      opacity: 1;
       transform: scale(1);
     }
+  }
 
+  @keyframes glow-pulse {
+    0%, 100% {
+      opacity: 0.4;
+      transform: scale(1);
+    }
     50% {
-      opacity: 1;
-      transform: scale(1.06);
+      opacity: 0.75;
+      transform: scale(1.04);
+    }
+  }
+
+  @keyframes reticle-pulse {
+    0%, 100% {
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+    50% {
+      border-color: rgba(16, 185, 129, 0.7);
     }
   }
 }
 
 @utility app-bg {
-  background-color: #020617;
+  background-color: #06080e;
   background-image:
-    radial-gradient(1100px 700px at 100% -10%, rgba(16, 185, 129, 0.13), transparent 60%),
-    radial-gradient(900px 650px at -15% 115%, rgba(59, 130, 246, 0.13), transparent 60%),
-    radial-gradient(600px 400px at 50% 50%, rgba(16, 185, 129, 0.04), transparent 70%);
+    radial-gradient(900px 500px at 100% 0%, rgba(16, 185, 129, 0.08), transparent 60%),
+    radial-gradient(800px 450px at 0% 100%, rgba(6, 182, 212, 0.07), transparent 60%),
+    radial-gradient(400px 300px at 50% 50%, rgba(16, 185, 129, 0.02), transparent 70%);
 }
 
 @utility glass-panel {
-  background: rgba(15, 23, 42, 0.55);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: rgba(11, 15, 25, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6), inset 0 1px 0 0 rgba(255, 255, 255, 0.08);
 }
 
 @utility glass-card {
-  background: rgba(2, 6, 23, 0.6);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(14, 20, 33, 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 10px 25px -10px rgba(0, 0, 0, 0.5), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+@utility glass-pill {
+  background: rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 @utility text-gradient-emerald {
-  background: linear-gradient(120deg, #34d399, #22d3ee);
+  background: linear-gradient(135deg, #34d399 0%, #22d3ee 100%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 
+@utility tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
-  user-select: none;
 }
 
-body {
+html, body {
   margin: 0;
   padding: 0;
-  background-color: #020617;
-  color: #f1f5f9;
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
-  overflow-x: hidden;
-  height: 100vh;
-  width: 100vw;
+  background-color: #06080e;
+  color: #f3f4f6;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  overflow: hidden;
+  height: 100%;
+  width: 100%;
   overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 #root {
   height: 100%;
   width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Custom scrollbars for the history list */
+/* iOS Safe Area Utilities */
+.safe-top {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+.safe-bottom {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+/* Custom scrollbars */
 .custom-scrollbar::-webkit-scrollbar {
   width: 4px;
 }
@@ -117,15 +170,16 @@ body {
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.28);
 }
 
-/* Hide native number/clear decorations on session input */
-input::-ms-clear {
+/* Hide native number/clear decorations */
+input::-ms-clear,
+input::-ms-reveal {
   display: none;
 }
